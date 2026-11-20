@@ -229,3 +229,38 @@ test('hũ quà: quà rơi vào hũ, đủ xu thì đầy, vỡ và chạy kịch
     ws.close(); late.close();
   } finally { await app.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test('hàng đợi: video phát lần lượt theo ưu tiên, hiệu ứng nhẹ chạy ngay, tạm dừng thì giữ lại', async () => {
+  const { EffectQueue } = await import('../src/queue.js');
+  const sent = [];
+  const q = new EffectQueue({ dispatch: (m) => sent.push(m), videoTimeoutMs: 60 });
+  const names = () => sent.map((m) => m.label);
+  q.push({ label: 'pháo', effect: 'confetti' });
+  q.push({ label: 'quà nhỏ', media: 'a.webm', priority: 4 });
+  q.push({ label: 'quà lớn', media: 'b.webm', priority: 2 });
+  q.push({ label: 'tim', effect: 'hearts' });
+  q.push({ label: 'khách VIP', media: 'c.webm', priority: 1 });
+  q.push({ label: 'quà lớn 2', media: 'd.webm', priority: 2 });
+  // Hiệu ứng nhẹ không chờ; video đầu tiên phát ngay vì lúc đó hàng đang trống.
+  assert.deepEqual(names(), ['pháo', 'quà nhỏ', 'tim']);
+  assert.deepEqual(q.state().waiting.map((w) => w.label), ['khách VIP', 'quà lớn', 'quà lớn 2']);
+  assert.equal(q.done('sai-ma'), false);
+  q.done(sent[1].id);
+  q.done(sent.at(-1).id);
+  assert.deepEqual(names().slice(3), ['khách VIP', 'quà lớn']);
+
+  // Tạm dừng: mọi thứ mới đến đều chờ, cái đang phát vẫn phát nốt.
+  q.setPaused(true);
+  q.push({ label: 'tim 2', effect: 'hearts' });
+  q.done(sent.at(-1).id);
+  assert.deepEqual(names().length, 5);
+  assert.deepEqual(q.state().waiting.map((w) => w.label), ['quà lớn 2', 'tim 2']);
+  q.setPaused(false);
+  assert.deepEqual(names().slice(5), ['tim 2', 'quà lớn 2']);
+  // Overlay không báo xong (ví dụ OBS đang tắt): hết thời gian chờ thì tự sang món kế.
+  q.push({ label: 'cuối', media: 'e.webm' });
+  await wait(120);
+  assert.equal(names().at(-1), 'cuối');
+  q.clear();
+  assert.deepEqual(q.state(), { paused: false, current: null, waiting: [] });
+});

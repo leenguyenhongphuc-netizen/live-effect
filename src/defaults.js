@@ -46,6 +46,7 @@ const rule = (id, name, trigger, action, extra = {}) => ({
   name,
   enabled: true,
   cooldown: 0,
+  priority: 3,
   trigger: { type: 'follow', user: '', giftId: '', giftName: '', minCoins: 0, minAmount: 0, every: 100, keyword: '', hotkey: '', ...trigger },
   action: {
     effect: 'none',
@@ -171,6 +172,7 @@ function sanitizeRule(input, index) {
     name: str(r.name, 60) || base.name,
     enabled: bool(r.enabled, true),
     cooldown: num(r.cooldown, 0, 3600, 0),
+    priority: Math.round(num(r.priority, 1, 4, 3)),
     trigger: {
       // Bản cũ gọi nút bấm tay là "hotkey".
       type: oneOf(t.type === 'hotkey' ? 'button' : t.type, TRIGGER_IDS, 'gift'),

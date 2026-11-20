@@ -284,6 +284,19 @@ try {
   await sleep(700);
   note((await particles()) > 20, `Bấm nút trên điện thoại: overlay có ${await particles()} hạt hiệu ứng`);
   note(!(await phone.locator('#app').textContent()).includes('null') && await phone.locator('section:has-text("Camera")').count() === 0, 'Điện thoại: chưa nối OBS thì không hiện hàng nút Camera');
+  // Tạm dừng từ điện thoại: bấm nút hiệu ứng thì xếp hàng chứ chưa chạy; bật lại mới chạy.
+  await phone.tap('#stop');
+  await sleep(500);
+  await phone.tap('#pause');
+  await sleep(500);
+  await phone.tap('.key.mine >> text=Ăn mừng');
+  await sleep(600);
+  note((await particles()) === 0, 'Điện thoại: đang tạm dừng thì hiệu ứng xếp hàng, chưa lên sóng');
+  await phone.tap('#pause');
+  await sleep(800);
+  note((await particles()) > 20, 'Điện thoại: bật lại thì hiệu ứng đang chờ được phát');
+  await phone.tap('#stop');
+  await sleep(400);
   await phone.tap('#celebrate');
   await sleep(500);
   note(app.config.gifts.celebrate === false && (await phone.locator('#celebrate').getAttribute('aria-pressed')) === 'false', 'Điện thoại: tắt được chúc mừng quà tặng');

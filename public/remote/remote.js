@@ -163,7 +163,7 @@ picker.addEventListener('change', () => {
 
 function draw(state) {
   // Chỉ dựng lại lưới nút khi danh sách nút thay đổi, để không giật khi đang bấm.
-  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate, state.camera]);
+  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate, state.camera, state.paused]);
   if (shape === lastShape) return;
   lastShape = shape;
   const mine = state.buttons.map((b) =>
@@ -190,7 +190,18 @@ function draw(state) {
   const camSection = state.camera
     ? el('section', '', el('h2', '', 'Camera'), el('div', 'grid', ...CAM.map(([id, name]) => keyButton(name, 'camera', { camera: id }, false))))
     : null;
-  app.replaceChildren(...[sw, mySection, camSection, quickSection].filter(Boolean));
+  // Tạm dừng hiệu ứng: quà mới vẫn xếp hàng, bật lại là phát tiếp.
+  const paused = state.paused === true;
+  const pz = el('button', 'switch-row', el('span', '', 'Tạm dừng hiệu ứng'), el('b', '', paused ? 'Đang dừng' : 'Đang chạy'));
+  pz.type = 'button';
+  pz.id = 'pause';
+  pz.setAttribute('aria-pressed', String(paused));
+  pz.addEventListener('click', async () => {
+    navigator.vibrate?.(12);
+    try { await call('POST', '/r/fire', { paused: !paused }); } catch (err) { if (err.auth) return needPairing(); }
+    return refresh();
+  });
+  app.replaceChildren(...[sw, pz, mySection, camSection, quickSection].filter(Boolean));
 }
 
 function needPairing() {

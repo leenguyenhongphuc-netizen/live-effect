@@ -64,10 +64,13 @@ export class Engine {
   }
 
   /** Chạy trực tiếp một hành động (nút thử, phím tắt, bảng hiệu ứng). */
-  fire(action, ev = {}) {
+  fire(action, ev = {}, meta = {}) {
     const ctx = this.context(ev);
     this.emit({
       type: 'fx',
+      priority: meta.priority || 3,
+      label: meta.name || '',
+      who: ev.nickname || ev.user || '',
       effect: action.effect || 'none',
       intensity: action.intensity || 2,
       duration: action.duration || 5,
@@ -85,7 +88,7 @@ export class Engine {
   fireRule(ruleId, ev = {}) {
     const rule = this.getConfig().rules.find((r) => r.id === ruleId);
     if (!rule) return false;
-    this.fire(rule.action, ev);
+    this.fire(rule.action, ev, rule);
     this.lastFired.set(rule.id, this.now());
     return true;
   }
@@ -169,7 +172,7 @@ export class Engine {
       const last = this.lastFired.get(rule.id);
       if (rule.cooldown > 0 && last !== undefined && now - last < rule.cooldown * 1000) continue;
       this.lastFired.set(rule.id, now);
-      this.fire(rule.action, ev);
+      this.fire(rule.action, ev, rule);
       fired.push(rule.id);
     }
     return fired;

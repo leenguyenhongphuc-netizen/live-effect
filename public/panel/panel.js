@@ -24,7 +24,7 @@ function h(spec, props, ...kids) {
 }
 
 const S = {
-  config: null, status: null, media: [], gifts: [], giftQuery: '', catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
+  config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -276,6 +276,31 @@ function twitchBox() {
     h('p.small.muted', null, 'Bits tính như quà tên “Bits” (1 bit = 1 xu), Sub tính như quà tên “Sub”. Đặt kịch bản theo tên quà đó.'));
 }
 
+// --- Hàng đợi hiệu ứng ------------------------------------------------------
+const PRIORITIES = [[1, 'Cao nhất'], [2, 'Cao'], [3, 'Thường'], [4, 'Thấp nhất']];
+
+async function setQueue(body) {
+  try { S.queue = (await api('POST', '/api/queue', body)).queue; render(); } catch (err) { toast(err.message); }
+}
+
+function queueCard() {
+  const q = S.queue;
+  const pick = { paused: q.paused };
+  const row = (item, playing) => h('div.media-item', null,
+    h('span', null, item.label || 'Hiệu ứng', item.who ? h('em', null, item.who) : null),
+    h('em', null, playing ? 'đang phát' : `ưu tiên: ${nameOf(PRIORITIES.map(([id, name]) => ({ id, name })), item.priority, '').toLowerCase()}`));
+  const shown = q.waiting.slice(0, 8);
+  return h('section.card', null,
+    h('div.card-head', null, h('h2', null, 'Hàng đợi hiệu ứng'),
+      toggle(pick, 'paused', q.paused ? 'Đang tạm dừng' : 'Đang chạy', () => setQueue({ paused: pick.paused }))),
+    h('p.muted', null, q.paused
+      ? 'Đang tạm dừng: quà và sự kiện mới vẫn được ghi nhận và xếp hàng, bật lại là phát tiếp.'
+      : 'Video toàn màn hình phát lần lượt, cái ưu tiên cao được chen lên trước. Tạm dừng khi cần màn hình yên mà không muốn mất hiệu ứng của khán giả.'),
+    q.current || shown.length ? h('div.media-list', null, q.current ? row(q.current, true) : null, shown.map((i) => row(i, false))) : null,
+    q.waiting.length > shown.length ? h('p.small.muted', null, `…và ${q.waiting.length - shown.length} hiệu ứng nữa đang chờ.`) : null,
+    q.current || q.waiting.length ? h('div.btn-row', null, h('button.btn.ghost', { type: 'button', onclick: () => setQueue({ clear: true }) }, 'Xoá hàng đợi')) : null);
+}
+
 // --- Mục: Bảng hiệu ứng -----------------------------------------------------
 function viewDeck() {
   const fire = (action) => act('/api/test', { action: { intensity: S.intensity, duration: 5, ...action } });
@@ -284,6 +309,7 @@ function viewDeck() {
   return h('div.view', null,
     head('Bảng hiệu ứng', 'Bấm là chạy ngay trên sóng. Hợp với stream game hoặc khi muốn tự tay khuấy động.',
       seg([[1, 'Nhẹ'], [2, 'Vừa'], [3, 'Mạnh']], S.intensity, (v) => { S.intensity = v; render(); }, 'Mức độ')),
+    queueCard(),
     h('section.card', null,
       h('h2', null, 'Hiệu ứng toàn màn hình'),
       h('div.tiles', null, effects.map((e) =>
@@ -416,7 +442,9 @@ function ruleEditor(rule) {
         ? 'Chèn được: {user} tên người ủng hộ · {amount} số tiền · {text} lời nhắn'
         : 'Chèn được: {user} tên người xem · {gift} tên quà · {count} số lượng · {coins} số xu') : null,
     h('div.rule-foot', null,
-      h('div.row', null, field('Nghỉ giữa hai lần chạy (giây)', numInput(rule, 'cooldown', { max: 3600 }))),
+      h('div.row', null,
+        field('Nghỉ giữa hai lần chạy (giây)', numInput(rule, 'cooldown', { max: 3600 })),
+        field('Ưu tiên trong hàng đợi', select(rule, 'priority', PRIORITIES, () => { rule.priority = Number(rule.priority); }))),
       h('button.btn.danger', { type: 'button', onclick: () => {
         S.config.rules = S.config.rules.filter((r) => r !== rule);
         S.openRule = null;
@@ -895,7 +923,8 @@ function renderStatus() {
     S.config.donate.enabled && S.config.donate.sepayToken ? h('div.stat', null,
       h(`span.dot${{ connected: '.ok', connecting: '.wait', error: '.err' }[S.status.donate?.state] || ''}`),
       h('span', null, S.status.donate?.state === 'connected' ? 'Chuyển khoản: đang theo dõi' : S.status.donate?.state === 'error' ? 'Chuyển khoản: lỗi SePay' : 'Chuyển khoản: đang nối…')) : null,
-  ].filter(Boolean));
+  ].filter(Boolean),
+    S.queue.paused ? h('div.stat', null, h('span.dot.wait'), h('span', null, `Hiệu ứng đang tạm dừng${S.queue.waiting.length ? ` · ${S.queue.waiting.length} đang chờ` : ''}`)) : null);
 }
 
 function render() {
@@ -947,6 +976,7 @@ function connectWs() {
         if (list) list.prepend(logRow(msg.event)); else render();
       }
     } else if (msg.type === 'media') { S.media = msg.media; softRender(); }
+    else if (msg.type === 'queue') { S.queue = msg.queue; if (S.view === 'deck') softRender(); else renderStatus(); }
     else if (msg.type === 'gifts') { S.gifts = msg.gifts; if (S.view === 'gifts') softRender(); }
     else if (msg.type === 'remote') { S.remote = msg.remote; if (S.view === 'phone') softRender(); }
     else if (msg.type === 'config' && !saving) { S.config = msg.config; softRender(); }

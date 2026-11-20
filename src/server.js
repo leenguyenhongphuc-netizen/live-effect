@@ -10,6 +10,7 @@ import { createRemote } from './remote.js';
 import { GiftCatalog } from './gifts.js';
 import { ObsCamera } from './obscam.js';
 import { Jar } from './jar.js';
+import { EffectQueue } from './queue.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -130,9 +131,16 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   };
 
   // Kịch bản có kèm chuyển động camera: gửi lệnh sang OBS cùng lúc với hiệu ứng trên overlay.
+  const queue = new EffectQueue({
+    dispatch: (msg) => {
+      if (msg.camera && msg.camera !== 'none') camera.move(msg.camera, { duration: msg.duration });
+      broadcast('overlay', msg);
+    },
+    onChange: () => { broadcast('panel', { type: 'queue', queue: queue.state() }); },
+  });
+  // Mọi hiệu ứng đi qua hàng đợi: video toàn màn hình phát lần lượt theo ưu tiên, còn lại chạy ngay.
   const engine = new Engine(() => store.config, (msg) => {
-    if (msg.type === 'fx' && msg.camera && msg.camera !== 'none') camera.move(msg.camera, { duration: msg.duration });
-    broadcast('overlay', msg);
+    if (msg.type === 'fx') queue.push(msg); else broadcast('overlay', msg);
   });
 
   const record = (ev, fired) => {
@@ -246,6 +254,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       status: { state: tiktok.status.state, username: tiktok.status.username, viewers: tiktok.status.viewers },
       overlays: overlayCount(),
       celebrate: store.config.gifts.celebrate,
+      paused: queue.paused,
       camera: camera.status.state === 'ready',
       buttons: store.config.rules
         .filter((r) => r.enabled && r.trigger.type === 'button')
@@ -256,12 +265,14 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     fire: (body) => {
       // Chuyển động camera bấm thẳng từ điện thoại (chỉ khi đã nối OBS).
       if (typeof body.camera === 'string') return camera.move(body.camera, { duration: 2.5 });
+      if (typeof body.paused === 'boolean') { queue.setPaused(body.paused); return true; }
       if (typeof body.celebrate === 'boolean') {
         store.set({ ...store.config, gifts: { ...store.config.gifts, celebrate: body.celebrate } });
         broadcast('panel', { type: 'config', config: store.config });
         return true;
       }
       if (body.clear === true) {
+        queue.clear();
         broadcast('overlay', { type: 'clear' });
         return true;
       }
@@ -306,6 +317,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     status: statusMsg(),
     media: store.listMedia(),
     gifts: catalog.list(),
+    queue: queue.state(),
     catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
     hookUrl: hookUrl(),
@@ -442,7 +454,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       return sendJson(res, 200, { ok, camera: camera.status });
     }
 
+    if (route === 'POST /api/queue') {
+      const body = await readJson(req);
+      if (typeof body.paused === 'boolean') queue.setPaused(body.paused);
+      if (body.clear === true) queue.clear();
+      return sendJson(res, 200, { queue: queue.state() });
+    }
+
     if (route === 'POST /api/clear') {
+      queue.clear();
       broadcast('overlay', { type: 'clear' });
       return sendJson(res, 200, { ok: true });
     }
@@ -562,6 +582,16 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       };
       clients.add(client);
       ws.on('pong', () => { client.dead = false; });
+      if (client.role === 'overlay') {
+        // Overlay báo một video / hình trong hàng đợi đã phát xong, để phát cái kế tiếp.
+        ws.on('message', (data) => {
+          if (data.length > 200) return;
+          try {
+            const msg = JSON.parse(data);
+            if (msg && msg.type === 'done' && typeof msg.id === 'string') queue.done(msg.id);
+          } catch { /* bỏ qua tin hỏng */ }
+        });
+      }
       if (client.role === 'panel') {
         ws.on('message', (data) => {
           if (data.length > 600) return;

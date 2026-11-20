@@ -80,7 +80,7 @@ let currentMediaFinish = null;
 function nextMedia() {
   if (mediaBusy || !mediaQueue.length) return;
   mediaBusy = true;
-  const { name, duration, fit, key } = mediaQueue.shift();
+  const { name, duration, fit, key, id } = mediaQueue.shift();
   const src = `/media/${encodeURIComponent(name)}`;
   const isVideo = /\.(webm|mp4)$/i.test(name);
   const source = document.createElement(isVideo ? 'video' : 'img');
@@ -92,6 +92,7 @@ function nextMedia() {
   const finish = () => {
     if (done) return;
     done = true;
+    report(id);
     node.classList.add('out');
     setTimeout(() => {
       keyed?.stop();
@@ -117,10 +118,16 @@ function nextMedia() {
   if (isVideo) source.play().catch(() => { source.muted = true; source.play().catch(finish); });
 }
 
-function pushMedia(name, duration, fit, key) {
+// Báo cho ứng dụng biết một món trong hàng đợi đã phát xong, để món kế tiếp được lên sóng.
+let socket = null;
+function report(id) {
+  if (id && socket?.readyState === 1) socket.send(JSON.stringify({ type: 'done', id }));
+}
+
+function pushMedia(name, duration, fit, key, id) {
   if (!has('media') || !name) return;
-  if (mediaQueue.length >= 10) return;
-  mediaQueue.push({ name, duration, fit, key: key || 'none' });
+  if (mediaQueue.length >= 10) { report(id); return; }
+  mediaQueue.push({ name, duration, fit, key: key || 'none', id });
   nextMedia();
 }
 
@@ -265,7 +272,7 @@ function onMessage(msg) {
         playSound(msg.sound, preview);
       }
       pushAlert(msg.alert, msg.avatar, msg.duration);
-      pushMedia(msg.media, msg.duration, msg.mediaFit, msg.mediaKey);
+      pushMedia(msg.media, msg.duration, msg.mediaFit, msg.mediaKey, msg.id);
       break;
     case 'widgets':
       applyWidgets(msg.widgets);
@@ -295,6 +302,7 @@ function onMessage(msg) {
 let retry = 500;
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws?role=overlay${preview ? '&preview=1' : ''}`);
+  socket = ws;
   ws.onopen = () => { retry = 500; };
   ws.onmessage = (e) => {
     try { onMessage(JSON.parse(e.data)); } catch { /* bỏ qua tin hỏng */ }
