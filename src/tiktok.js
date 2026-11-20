@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { normalizeCatalogGift } from './gifts.js';
 
 // Kết nối tới phiên TikTok LIVE qua thư viện tiktok-live-connector (không chính thức)
 // và chuẩn hoá sự kiện về một dạng chung cho bộ máy kịch bản.
@@ -18,9 +19,12 @@ export function normalizeUser(u = {}) {
 }
 
 /** Trả về sự kiện quà đã chuẩn hoá, hoặc null nếu chuỗi quà chưa kết thúc. */
-export function normalizeGift(data = {}) {
+export function normalizeGift(data = {}, catalog = null) {
   const g = first(data.gift, data.giftDetails, data.extendedGiftInfo) || {};
-  const ext = data.extendedGiftInfo || {};
+  const giftId = String(first(data.giftId, g.id, '') ?? '');
+  // Tin nhắn quà đôi khi không kèm tên và giá: lấy từ danh mục quà của phòng.
+  const known = catalog?.get(giftId);
+  const ext = data.extendedGiftInfo || (known ? { name: known.name, diamond_count: known.coins, image: known.image, type: known.type } : {});
   const giftType = Number(first(g.type, g.giftType, ext.type, 0));
   // Quà dạng chuỗi (type 1) bắn nhiều sự kiện khi đang bấm liên tục;
   // chỉ lấy sự kiện kết thúc chuỗi để đếm đúng số lượng.
@@ -30,8 +34,9 @@ export function normalizeGift(data = {}) {
   return {
     type: 'gift',
     ...normalizeUser(data.user),
+    giftId,
     giftName: first(g.name, g.giftName, ext.name, `Quà #${data.giftId || '?'}`),
-    giftImage: first(img(g.image), img(g.icon), img(g.giftImage), img(ext.image), img(ext.icon)) || '',
+    giftImage: first(img(g.image), img(g.icon), img(g.giftImage), typeof ext.image === 'string' ? ext.image : img(ext.image), img(ext.icon)) || '',
     count,
     coins: diamonds * count,
   };
@@ -93,6 +98,7 @@ export class TikTokSource extends EventEmitter {
     this.loadLib = loadLib;
     this.pollMs = pollMs;
     this.waitTicks = 0;
+    this.catalog = null; // danh mục quà do máy chủ cấp, để bù tên và giá quà
     this.conn = null;
     this.username = '';
     this.status = { state: 'idle', username: '', error: '', detail: '', viewers: 0 };
@@ -134,7 +140,9 @@ export class TikTokSource extends EventEmitter {
       return;
     }
     const { TikTokLiveConnection, WebcastEvent, ControlEvent } = lib;
-    const opts = { enableExtendedGiftInfo: true, processInitialData: false };
+    // Không bật enableExtendedGiftInfo: thư viện sẽ coi lỗi tải danh sách quà là lỗi kết nối.
+    // Danh sách quà được tải riêng sau khi kết nối, hỏng cũng không ảnh hưởng phiên live.
+    const opts = { processInitialData: false };
     if (this.signApiKey) opts.signApiKey = this.signApiKey;
 
     let conn;
@@ -150,7 +158,7 @@ export class TikTokSource extends EventEmitter {
     const push = (ev) => { if (live()) this.emit('event', ev); };
 
     conn.on(WebcastEvent.CHAT, (d) => push({ type: 'chat', ...normalizeUser(d.user), text: first(d.comment, d.content) || '' }));
-    conn.on(WebcastEvent.GIFT, (d) => { const ev = normalizeGift(d); if (ev) push(ev); });
+    conn.on(WebcastEvent.GIFT, (d) => { const ev = normalizeGift(d, this.catalog); if (ev) push(ev); });
     conn.on(WebcastEvent.LIKE, (d) => push({
       type: 'like',
       ...normalizeUser(d.user),
@@ -179,6 +187,10 @@ export class TikTokSource extends EventEmitter {
       if (!live()) return;
       this.retry = 0;
       this.#setStatus({ state: 'connected', username: this.username, error: '', detail: '' });
+      Promise.resolve()
+        .then(() => conn.fetchAvailableGifts?.())
+        .then((list) => { if (live() && Array.isArray(list)) this.emit('gifts', list.map(normalizeCatalogGift).filter(Boolean)); })
+        .catch(() => { /* không có danh sách quà: vẫn học dần từ quà nhận được */ });
     } catch (err) {
       if (!live()) return;
       const fail = classify(err, this.username);

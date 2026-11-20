@@ -43,6 +43,14 @@ test('sự kiện TikTok đi tới overlay và trang lạ bị chặn', async ()
     assert.equal(fx.effect, 'giftrain');
     assert.equal(fx.alert, 'An tặng 3 Rose');
 
+    // Danh mục quà đến từ TikTok và từ chính quà vừa nhận; thử đúng một món quà theo mã.
+    t.source.emit('gifts', [{ id: '6369', name: 'Lion', coins: 29999, image: 'https://cdn/lion.png', type: 2 }]);
+    t.source.emit('event', { type: 'gift', user: 'b', giftId: '777', giftName: 'Mới', count: 2, coins: 20 });
+    const gifts = (await t.json('GET', '/api/state')).body.gifts;
+    assert.deepEqual(gifts.map((g) => [g.id, g.coins]), [['777', 10], ['6369', 29999]]);
+    await t.json('POST', '/api/simulate', { giftId: '6369' });
+    assert.equal((await ov.wait((m) => m.type === 'fx' && m.effect === 'fireworks')).image, 'https://cdn/lion.png');
+
     const sim = await t.json('POST', '/api/simulate', { type: 'follow' });
     assert.equal(sim.body.overlays, 1);
     await ov.wait((m) => m.type === 'fx' && m.effect === 'hearts');
@@ -115,6 +123,11 @@ test('điện thoại: tắt mặc định, cần mã ghép nối, chỉ bấm �
     assert.deepEqual(await (await r('POST', '/r/fire', token, { ruleId: 'r-gift' })).json(), { ok: false });
     assert.deepEqual(await (await r('POST', '/r/fire', token, { effect: 'snow' })).json(), { ok: true });
     assert.deepEqual(await (await r('POST', '/r/fire', token, { clear: true })).json(), { ok: true });
+    // Bật tắt chúc mừng quà từ điện thoại.
+    assert.equal(rs.celebrate, true);
+    assert.deepEqual(await (await r('POST', '/r/fire', token, { celebrate: false })).json(), { ok: true });
+    assert.equal(t.app.config.gifts.celebrate, false);
+    assert.equal((await (await r('GET', '/r/state', token)).json()).celebrate, false);
     await ov.wait((m) => m.type === 'clear');
 
     // Đổi mã: mã cũ mất hiệu lực ngay.

@@ -43,7 +43,7 @@ async function checkLayout(page, name) {
   note(r.small.length === 0, `${name}: vùng bấm đủ lớn${r.small.length ? ` → ${r.small.join(' | ')}` : ''}`);
 }
 
-const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
+const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
 
 try {
   // ----- Máy tính ---------------------------------------------------------
@@ -139,6 +139,32 @@ try {
   await sleep(400);
   note(await frame().locator('#media > *').count() === 0, 'Dừng mọi hiệu ứng tắt cả video đang phát');
 
+  // Quà tặng: danh mục, thử một quà, gán hiệu ứng riêng, công tắc tổng.
+  app.ingest({ type: 'gift', user: 'a', nickname: 'An', giftId: '5655', giftName: 'Rose', count: 1, coins: 1 });
+  app.ingest({ type: 'gift', user: 'b', nickname: 'Bình', giftId: '6369', giftName: 'Lion', count: 1, coins: 29999 });
+  await desk.click('#clear-all');
+  await desk.click('#nav >> text=Quà tặng');
+  await desk.waitForSelector('.gift-row');
+  note(await desk.locator('.gift-row').count() === 2, 'Quà tặng: quà vừa nhận tự vào danh sách');
+  await desk.fill('input[type=search]', 'lio');
+  note(await desk.locator('.gift-row').count() === 1, 'Quà tặng: tìm theo tên lọc đúng');
+  await desk.click('.gift-row >> [title="Thử quà này"]');
+  await sleep(600);
+  note((await frame().locator('.alert').textContent()).includes('Lion'), 'Quà tặng: thử một quà hiện đúng tên quà đó');
+  await desk.screenshot({ path: path.join(shots, '16-qua-tang.png') });
+  await checkLayout(desk, 'Quà tặng');
+  await desk.click('#clear-all');
+  await desk.click('.card-head .switch');
+  await sleep(600);
+  await desk.click('.gift-row >> [title="Thử quà này"]');
+  await sleep(500);
+  note((await particles()) === 0 && await frame().locator('.alert').count() === 0, 'Quà tặng: tắt công tắc tổng thì quà không hiện gì');
+  await desk.click('.card-head .switch');
+  await sleep(600);
+  await desk.click('.gift-row >> text=Hiệu ứng riêng');
+  await desk.waitForSelector('.rule-edit');
+  note((await desk.locator('.rule:has(.rule-edit) .rule-text span').textContent()).includes('tặng Lion'), 'Quà tặng: "Hiệu ứng riêng" tạo kịch bản cho đúng quà và mở ra sửa');
+
   // Điện thoại: bật, lấy địa chỉ từ mã QR.
   await desk.click('#nav >> text=Điện thoại');
   await desk.screenshot({ path: path.join(shots, '07-dien-thoai-tat.png') });
@@ -161,12 +187,18 @@ try {
   await phone.goto(remoteUrl);
   await phone.waitForSelector('.key');
   note(!phone.url().includes('k='), 'Điện thoại: mã ghép nối được xoá khỏi thanh địa chỉ');
-  note(await phone.locator('.key.mine').count() === 3, `Điện thoại: thấy ${await phone.locator('.key.mine').count()} nút riêng (2 mặc định + nút video vừa tạo)`);
+  note(await phone.locator('.key.mine').count() === 3 && await phone.locator('#celebrate').count() === 1, `Điện thoại: thấy ${await phone.locator('.key.mine').count()} nút riêng (2 mặc định + nút video vừa tạo)`);
   await checkLayout(phone, 'Điện thoại (390px)');
   await phone.screenshot({ path: path.join(shots, '10-phone.png') });
   await phone.tap('.key.mine >> text=Ăn mừng');
   await sleep(700);
   note((await particles()) > 20, `Bấm nút trên điện thoại: overlay có ${await particles()} hạt hiệu ứng`);
+  await phone.tap('#celebrate');
+  await sleep(500);
+  note(app.config.gifts.celebrate === false && (await phone.locator('#celebrate').getAttribute('aria-pressed')) === 'false', 'Điện thoại: tắt được chúc mừng quà tặng');
+  await phone.tap('#celebrate');
+  await sleep(500);
+  note(app.config.gifts.celebrate === true, 'Điện thoại: bật lại chúc mừng quà tặng');
   await phone.tap('#stop');
   await sleep(400);
   note((await particles()) === 0, 'Nút dừng trên điện thoại hoạt động');

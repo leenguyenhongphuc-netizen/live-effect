@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { Store } from './store.js';
 import { sendJson, readBody, readJson, serveFile } from './http.js';
 import { createRemote } from './remote.js';
+import { GiftCatalog } from './gifts.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { EFFECTS, SOUNDS, TRIGGERS, MEDIA_EXT, DEFAULT_PORT, safeMediaName, blankRule } from './defaults.js';
@@ -31,6 +32,8 @@ const SAMPLE = {
 export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source } = {}) {
   const store = new Store(dataDir);
   const tiktok = source || new TikTokSource();
+  const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
+  tiktok.catalog = catalog;
   const clients = new Set(); // { ws, role }
   const log = []; // nhật ký sự kiện gần đây
   let hotkeyErrors = [];
@@ -53,7 +56,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     broadcast('panel', { type: 'event', event: entry });
   };
 
+  const mergeGifts = (list) => {
+    if (catalog.merge(list)) broadcast('panel', { type: 'gifts', gifts: catalog.list() });
+  };
+  tiktok.on('gifts', mergeGifts);
+
   const ingest = (ev) => {
+    if (ev.type === 'gift' && ev.giftId && !ev.simulated) {
+      mergeGifts([{ id: ev.giftId, name: ev.giftName, coins: Math.round((ev.coins || 0) / (ev.count || 1)), image: ev.giftImage }]);
+    }
     const fired = engine.handle(ev);
     // Người vào xem xuất hiện dồn dập; chỉ ghi nhật ký khi có kịch bản chạy.
     if (ev.type !== 'join' || fired.length) record(ev, fired);
@@ -82,6 +93,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     getState: () => ({
       status: { state: tiktok.status.state, username: tiktok.status.username, viewers: tiktok.status.viewers },
       overlays: overlayCount(),
+      celebrate: store.config.gifts.celebrate,
       buttons: store.config.rules
         .filter((r) => r.enabled && r.trigger.type === 'button')
         .map((r) => ({ id: r.id, name: r.name, effect: r.action.effect, media: Boolean(r.action.media) })),
@@ -89,6 +101,11 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     }),
     // Điện thoại chỉ được làm ba việc: bấm một nút, chạy một hiệu ứng có sẵn, dừng tất cả.
     fire: (body) => {
+      if (typeof body.celebrate === 'boolean') {
+        store.set({ ...store.config, gifts: { ...store.config.gifts, celebrate: body.celebrate } });
+        broadcast('panel', { type: 'config', config: store.config });
+        return true;
+      }
       if (body.clear === true) {
         broadcast('overlay', { type: 'clear' });
         return true;
@@ -111,6 +128,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     config: store.config,
     status: statusMsg(),
     media: store.listMedia(),
+    gifts: catalog.list(),
     catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
     capabilities: { hotkeys },
@@ -191,6 +209,12 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
     if (route === 'POST /api/simulate') {
       const body = await readJson(req);
+      // Thử đúng một món quà trong danh mục (kèm hình thật của quà đó).
+      const gift = body.giftId ? catalog.get(String(body.giftId)) : null;
+      if (gift) {
+        ingest({ ...SAMPLE.gift, giftId: gift.id, giftName: gift.name, giftImage: gift.image, count: 1, coins: gift.coins, simulated: true });
+        return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+      }
       const sample = SAMPLE[body.type];
       if (!sample) return sendJson(res, 400, { error: 'Loại sự kiện không hợp lệ' });
       // Mỗi lần giả lập follow dùng tên khác nhau để không bị coi là follow lặp.

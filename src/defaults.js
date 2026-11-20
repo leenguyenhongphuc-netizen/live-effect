@@ -44,7 +44,7 @@ const rule = (id, name, trigger, action, extra = {}) => ({
   name,
   enabled: true,
   cooldown: 0,
-  trigger: { type: 'follow', user: '', giftName: '', minCoins: 0, every: 100, keyword: '', hotkey: '', ...trigger },
+  trigger: { type: 'follow', user: '', giftId: '', giftName: '', minCoins: 0, every: 100, keyword: '', hotkey: '', ...trigger },
   action: {
     effect: 'none',
     intensity: 2,
@@ -71,6 +71,7 @@ export function defaultConfig() {
     },
     tts: { enabled: false, chat: true, gift: true, follow: true, voice: '', rate: 1, maxLength: 80 },
     remote: { enabled: false, token: '' },
+    gifts: { celebrate: true },
     rules: [
       rule('r-follow', 'Cảm ơn follow', { type: 'follow' }, {
         effect: 'hearts', text: 'Cảm ơn {user} đã follow!', sound: 'ding',
@@ -152,6 +153,7 @@ function sanitizeRule(input, index) {
       // Bản cũ gọi nút bấm tay là "hotkey".
       type: oneOf(t.type === 'hotkey' ? 'button' : t.type, TRIGGER_IDS, 'gift'),
       user: str(t.user, 60).trim().replace(/^@/, ''),
+      giftId: str(t.giftId, 24).replace(/\D/g, ''),
       giftName: str(t.giftName, 60).trim(),
       minCoins: Math.round(num(t.minCoins, 0, 1e6, 0)),
       every: Math.round(num(t.every, 1, 1e6, 100)),
@@ -179,6 +181,7 @@ export function sanitizeConfig(input) {
   const tk = c.tiktok && typeof c.tiktok === 'object' ? c.tiktok : {};
   const tts = c.tts && typeof c.tts === 'object' ? c.tts : {};
   const rm = c.remote && typeof c.remote === 'object' ? c.remote : {};
+  const gf = c.gifts && typeof c.gifts === 'object' ? c.gifts : {};
   const al = w.alerts || {};
   const ch = w.chat || {};
   const go = w.goal || {};
@@ -228,6 +231,7 @@ export function sanitizeConfig(input) {
       enabled: bool(rm.enabled, false),
       token: /^[0-9a-f]{32}$/.test(rm.token) ? rm.token : '',
     },
+    gifts: { celebrate: bool(gf.celebrate, true) },
     rules,
   };
 }

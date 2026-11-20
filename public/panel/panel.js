@@ -22,10 +22,11 @@ function h(spec, props, ...kids) {
 }
 
 const S = {
-  config: null, status: null, media: [], catalog: null, overlayUrl: '', capabilities: {}, log: [], remote: null,
+  config: null, status: null, media: [], gifts: [], giftQuery: '', catalog: null, overlayUrl: '', capabilities: {}, log: [], remote: null,
   view: 'home', openRule: null, guide: 'obs', intensity: 2,
 };
 const main = document.getElementById('main');
+const nf = new Intl.NumberFormat('vi-VN');
 const nameOf = (list, id, fallback = '') => list.find((x) => x.id === id)?.name || fallback;
 
 // --- Giao tiếp với ứng dụng -------------------------------------------------
@@ -294,7 +295,19 @@ function ruleEditor(rule) {
 
   const cond = [];
   if (t.type === 'gift') {
-    cond.push(field('Tên quà', textInput(t, 'giftName', { placeholder: 'Bỏ trống = mọi loại quà' }), 'Ví dụ: Rose, Lion, Universe (đúng tên hiển thị trên TikTok).'));
+    if (S.gifts.length) {
+      // Chọn quà từ danh mục thật của TikTok: khớp theo mã quà nên không sợ sai tên.
+      const pick = { id: t.giftId };
+      const opts = [['', 'Mọi loại quà'], ...S.gifts.map((g) => [g.id, `${g.name} · ${nf.format(g.coins)} xu`])];
+      if (t.giftId && !S.gifts.some((g) => g.id === t.giftId)) opts.push([t.giftId, t.giftName || `Quà #${t.giftId}`]);
+      cond.push(field('Quà', select(pick, 'id', opts, () => {
+        t.giftId = pick.id;
+        t.giftName = S.gifts.find((g) => g.id === pick.id)?.name || '';
+        save(); render();
+      })));
+    } else {
+      cond.push(field('Tên quà', textInput(t, 'giftName', { placeholder: 'Bỏ trống = mọi loại quà' }), 'Ví dụ: Rose, Lion, Universe. Sau lần kết nối live đầu tiên, ở đây sẽ có danh sách quà để chọn.'));
+    }
     cond.push(field('Tổng giá trị từ (xu)', numInput(t, 'minCoins', { max: 1e6 })));
   }
   if (t.type === 'like') cond.push(field('Cứ mỗi bao nhiêu tim', numInput(t, 'every', { min: 1, max: 1e6 })));
@@ -367,6 +380,64 @@ function viewRules() {
     head('Kịch bản tự động', 'Mỗi kịch bản là một câu “Khi… thì…”. Nhiều kịch bản cùng khớp thì chạy cùng lúc.',
       h('button.btn.primary', { type: 'button', onclick: add }, icon('plus'), 'Thêm kịch bản')),
     h('div.rules', null, S.config.rules.length ? S.config.rules.map(row) : h('p.empty', null, 'Chưa có kịch bản nào. Bấm “Thêm kịch bản” để tạo cái đầu tiên.')));
+}
+
+// --- Mục: Quà tặng ----------------------------------------------------------
+const ruleForGift = (gift) => S.config.rules.find((r) => r.trigger.type === 'gift'
+  && (r.trigger.giftId ? r.trigger.giftId === gift.id : r.trigger.giftName && r.trigger.giftName.toLowerCase() === gift.name.toLowerCase()));
+
+async function giftRule(gift) {
+  try {
+    const { rule } = await api('POST', '/api/rules/new');
+    rule.name = `Quà ${gift.name}`.slice(0, 60);
+    rule.trigger = { ...rule.trigger, type: 'gift', giftId: gift.id, giftName: gift.name };
+    S.config.rules.push(rule);
+    S.openRule = rule.id;
+    S.view = 'rules';
+    save(); render();
+    main.querySelector(`[data-rule="${rule.id}"]`)?.scrollIntoView({ block: 'center' });
+  } catch (err) { toast(err.message); }
+}
+
+function giftRow(gift) {
+  const rule = ruleForGift(gift);
+  const pic = gift.image
+    ? h('img', { src: gift.image, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer', width: 40, height: 40 })
+    : h('span.gift-ph', { 'aria-hidden': 'true' }, icon('giftrain', 22));
+  return h('div.gift-row', null, pic,
+    h('div.rule-text', null, h('b', null, gift.name),
+      h('span', null, `${nf.format(gift.coins)} xu · ${rule ? `riêng: ${rule.name}${rule.enabled ? '' : ' (đang tắt)'}` : 'hiệu ứng chung'}`)),
+    h('div.rule-actions', null,
+      h('button.btn.icon', { type: 'button', title: 'Thử quà này', 'aria-label': `Thử quà ${gift.name}`, onclick: () => act('/api/simulate', { giftId: gift.id }) }, icon('play')),
+      rule
+        ? h('button.btn', { type: 'button', onclick: () => { S.openRule = rule.id; S.view = 'rules'; render(); } }, 'Sửa')
+        : h('button.btn', { type: 'button', onclick: () => giftRule(gift) }, 'Hiệu ứng riêng')));
+}
+
+function viewGifts() {
+  const g = S.config.gifts;
+  const general = S.config.rules.filter((r) => r.enabled && r.trigger.type === 'gift' && !r.trigger.giftId && !r.trigger.giftName && !r.trigger.user);
+  const listBox = h('div.gift-list');
+  const fill = () => {
+    const q = S.giftQuery.trim().toLowerCase();
+    const rows = S.gifts.filter((x) => !q || x.name.toLowerCase().includes(q));
+    listBox.replaceChildren(...(rows.length ? rows.map(giftRow) : [h('p.empty', null, `Không có quà nào tên “${S.giftQuery}”.`)]));
+  };
+  fill();
+  return h('div.view', null,
+    head('Quà tặng', 'Bật tắt chúc mừng, và gán hiệu ứng riêng cho từng món quà của TikTok.'),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Chúc mừng quà tặng'), toggle(g, 'celebrate', g.celebrate ? 'Đang bật' : 'Đang tắt', render)),
+      h('p.muted', null, 'Tắt khi bạn muốn màn hình yên, ví dụ đang PK hoặc đang nói chuyện nghiêm túc. Quà vẫn được đếm vào thanh mục tiêu. Công tắc này cũng có trên điện thoại.'),
+      h('p.small.muted', null, general.length
+        ? `Quà chưa có hiệu ứng riêng sẽ chạy kịch bản chung: ${general.map((r) => r.name).join(', ')}.`
+        : 'Hiện không có kịch bản chung nào cho quà: chỉ những quà có hiệu ứng riêng mới được chúc mừng.')),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, `Danh sách quà${S.gifts.length ? ` (${S.gifts.length})` : ''}`)),
+      S.gifts.length
+        ? [h('input.input', { type: 'search', placeholder: 'Tìm theo tên quà', 'aria-label': 'Tìm quà', value: S.giftQuery,
+          oninput: (e) => { S.giftQuery = e.target.value; fill(); } }), listBox]
+        : h('p.muted', null, 'Danh sách quà được tải từ TikTok ở lần kết nối với phiên live đầu tiên, rồi lưu lại trong máy. Trong lúc chờ, bạn vẫn tạo được kịch bản quà theo tên ở mục Kịch bản.')));
 }
 
 // --- Mục: Điện thoại --------------------------------------------------------
@@ -513,6 +584,7 @@ const VIEWS = [
   ['home', 'Bắt đầu', 'home', viewHome],
   ['deck', 'Bảng hiệu ứng', 'deck', viewDeck],
   ['rules', 'Kịch bản', 'rules', viewRules],
+  ['gifts', 'Quà tặng', 'giftrain', viewGifts],
   ['phone', 'Điện thoại', 'phone', viewPhone],
   ['display', 'Hiển thị', 'layout', viewDisplay],
   ['log', 'Nhật ký', 'log', viewLog],
@@ -584,6 +656,7 @@ function connectWs() {
         if (list) list.prepend(logRow(msg.event)); else render();
       }
     } else if (msg.type === 'media') { S.media = msg.media; softRender(); }
+    else if (msg.type === 'gifts') { S.gifts = msg.gifts; if (S.view === 'gifts') softRender(); }
     else if (msg.type === 'remote') { S.remote = msg.remote; if (S.view === 'phone') softRender(); }
     else if (msg.type === 'config' && !saving) { S.config = msg.config; softRender(); }
     else if (msg.type === 'tts') speak(msg.text);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Engine } from '../src/engine.js';
 import { defaultConfig, sanitizeConfig, safeMediaName } from '../src/defaults.js';
+import { GiftCatalog, normalizeCatalogGift } from '../src/gifts.js';
 import { normalizeGift, normalizeUser, friendlyError, classify, TikTokSource } from '../src/tiktok.js';
 
 function setup(mutate) {
@@ -122,7 +123,7 @@ test('quà theo chuỗi chỉ tính khi chuỗi kết thúc', () => {
   const streak = { giftId: '5655', repeatCount: 7, user: { displayId: 'an', nickname: 'An', avatarThumb: { urlList: ['https://x/a.jpg'] } }, gift: { name: 'Rose', type: 1, diamondCount: 1, image: { urlList: ['https://x/rose.png'] } } };
   assert.equal(normalizeGift({ ...streak, repeatEnd: 0 }), null);
   assert.deepEqual(normalizeGift({ ...streak, repeatEnd: 1 }), {
-    type: 'gift', user: 'an', nickname: 'An', avatar: 'https://x/a.jpg', giftName: 'Rose', giftImage: 'https://x/rose.png', count: 7, coins: 7,
+    type: 'gift', user: 'an', nickname: 'An', avatar: 'https://x/a.jpg', giftId: '5655', giftName: 'Rose', giftImage: 'https://x/rose.png', count: 7, coins: 7,
   });
   // Dạng trường của phiên bản giao thức cũ.
   const old = normalizeGift({ repeatCount: 1, user: { uniqueId: 'b' }, giftDetails: { giftName: 'Lion', giftType: 2, diamondCount: 29999, giftImage: { giftPictureUrl: 'https://x/l.png' } } });
@@ -184,4 +185,45 @@ test('bấm kết nối trước khi lên sóng: ứng dụng chờ rồi tự k
   liveAfter = 0;
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(src.status.state, 'idle');
+});
+
+test('quà có hiệu ứng riêng thì không chạy thêm hiệu ứng chung; công tắc tổng tắt hết', () => {
+  const { engine, fx, config } = setup((c) => {
+    c.rules.push({ id: 'lion', name: 'Sư tử', trigger: { type: 'gift', giftId: '6369', giftName: 'Lion' }, action: { media: 'lion.webm', alert: false } });
+  });
+  // Tên hiển thị khác ngôn ngữ vẫn khớp nhờ mã quà.
+  assert.deepEqual(engine.handle({ type: 'gift', giftId: '6369', giftName: 'Sư tử', coins: 29999 }), ['lion']);
+  assert.equal(fx().at(-1).media, 'lion.webm');
+  assert.deepEqual(engine.handle({ type: 'gift', giftId: '5655', giftName: 'Rose', coins: 1 }), ['r-gift']);
+
+  config.gifts.celebrate = false;
+  const before = fx().length;
+  assert.deepEqual(engine.handle({ type: 'gift', giftId: '6369', giftName: 'Lion', coins: 29999 }), []);
+  assert.equal(fx().length, before);
+  // Quà vẫn được cộng vào mục tiêu, và sự kiện khác vẫn chạy bình thường.
+  config.widgets.goal.type = 'coins';
+  assert.equal(engine.goalState().value, 29999 + 1 + 29999);
+  assert.deepEqual(engine.handle({ type: 'follow', user: 'moi' }), ['r-follow']);
+});
+
+test('danh mục quà: chuẩn hoá dữ liệu TikTok, gộp không mất thông tin, bù tên cho tin nhắn quà', () => {
+  const file = `${process.env.TMPDIR || '/tmp'}/gifts-${process.pid}-${Date.now()}.json`;
+  const cat = new GiftCatalog(file);
+  assert.equal(normalizeCatalogGift({ name: 'thiếu mã' }), null);
+  assert.equal(cat.merge([
+    { id: 6369, name: 'Lion', diamond_count: 29999, type: 2, image: { url_list: ['https://cdn/lion.png'] } },
+    { id: 5655, name: 'Rose', diamond_count: 1, type: 1, icon: { url_list: ['https://cdn/rose.png'] } },
+    { id: 1, name: 'Xấu', image: { url_list: ['javascript:alert(1)'] } },
+  ]), true);
+  assert.deepEqual(cat.list().map((g) => g.name), ['Xấu', 'Rose', 'Lion']);
+  assert.equal(cat.get('1').image, '');
+  // Quà học từ sự kiện thiếu hình không được xoá hình đã có.
+  assert.equal(cat.merge([{ id: '6369', name: 'Lion', coins: 29999, image: '' }]), false);
+  assert.equal(cat.get(6369).image, 'https://cdn/lion.png');
+  assert.equal(new GiftCatalog(file).list().length, 3);
+
+  const ev = normalizeGift({ giftId: '6369', repeatCount: 2, user: { displayId: 'a' } }, cat);
+  assert.equal(ev.giftName, 'Lion');
+  assert.equal(ev.coins, 59998);
+  assert.equal(ev.giftImage, 'https://cdn/lion.png');
 });

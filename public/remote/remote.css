@@ -66,6 +66,16 @@ section h2 { font-size: 14px; font-weight: 600; color: var(--muted); margin-bott
 }
 .stop:active { opacity: 0.8; }
 
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; min-height: 60px; padding: 0 16px;
+  background: var(--surface); border: 0; border-radius: 14px; font-weight: 600; text-align: left;
+  touch-action: manipulation; cursor: pointer;
+}
+.switch-row b { flex: none; padding: 6px 12px; border-radius: 99px; background: var(--line); color: var(--ink); font-size: 14px; }
+.switch-row[aria-pressed="true"] b { background: var(--ok); color: var(--bg); }
+.switch-row:active { background: var(--surface-2); }
+
 .msg { padding: 40px 8px; text-align: center; color: var(--muted); display: flex; flex-direction: column; gap: 10px; }
 .msg b { color: var(--ink); font-size: 20px; }
 .hint { font-size: 14px; color: var(--muted); }

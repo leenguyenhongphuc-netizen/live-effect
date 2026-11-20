@@ -82,7 +82,9 @@ export class Engine {
     if (t.user && t.user.toLowerCase() !== String(ev.user || '').replace(/^@/, '').toLowerCase()) return false;
     switch (t.type) {
       case 'gift': {
-        if (t.giftName && t.giftName.toLowerCase() !== String(ev.giftName || '').toLowerCase()) return false;
+        // Ưu tiên so theo mã quà (tên quà đổi theo ngôn ngữ của TikTok); không có mã thì so tên.
+        if (t.giftId) { if (t.giftId !== String(ev.giftId || '')) return false; }
+        else if (t.giftName && t.giftName.toLowerCase() !== String(ev.giftName || '').toLowerCase()) return false;
         return (ev.coins || 0) >= t.minCoins;
       }
       case 'chat': {
@@ -128,10 +130,15 @@ export class Engine {
       this.emit({ type: 'chat', user: ev.nickname || ev.user || '', text: ev.text || '', avatar: ev.avatar || '' });
     }
 
+    // Công tắc tổng "Chúc mừng quà tặng": tắt thì quà vẫn được đếm vào mục tiêu nhưng không hiện gì.
+    if (ev.type === 'gift' && !cfg.gifts.celebrate) return fired;
+
     const now = this.now();
-    for (const rule of cfg.rules) {
-      if (!rule.enabled) continue;
-      if (!this.#matches(rule, ev)) continue;
+    let matched = cfg.rules.filter((rule) => rule.enabled && this.#matches(rule, ev));
+    // Quà đã có hiệu ứng riêng thì không chạy thêm hiệu ứng chung cho "mọi loại quà".
+    const own = (r) => r.trigger.giftId || r.trigger.giftName;
+    if (ev.type === 'gift' && matched.some(own)) matched = matched.filter(own);
+    for (const rule of matched) {
       const last = this.lastFired.get(rule.id);
       if (rule.cooldown > 0 && last !== undefined && now - last < rule.cooldown * 1000) continue;
       this.lastFired.set(rule.id, now);

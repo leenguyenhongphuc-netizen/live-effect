@@ -66,7 +66,7 @@ function keyButton(label, iconName, body, mine) {
 
 function draw(state) {
   // Chỉ dựng lại lưới nút khi danh sách nút thay đổi, để không giật khi đang bấm.
-  const shape = JSON.stringify([state.buttons, state.effects]);
+  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate]);
   if (shape === lastShape) return;
   lastShape = shape;
   const mine = state.buttons.map((b) =>
@@ -76,7 +76,18 @@ function draw(state) {
   if (mine.length) mySection.append(el('div', 'grid', ...mine));
   else mySection.append(el('p', 'hint', 'Chưa có nút riêng. Trên máy tính, vào Kịch bản và thêm kịch bản với sự kiện “Nút bấm tay”.'));
   const quickSection = el('section', '', el('h2', '', 'Hiệu ứng nhanh'), el('div', 'grid', ...quick));
-  app.replaceChildren(mySection, quickSection);
+  // Công tắc tổng cho chúc mừng quà: bấm là đổi ngay, không cần chạy về máy tính.
+  const on = state.celebrate !== false;
+  const sw = el('button', 'switch-row', el('span', '', 'Chúc mừng quà tặng'), el('b', '', on ? 'Đang bật' : 'Đang tắt'));
+  sw.type = 'button';
+  sw.id = 'celebrate';
+  sw.setAttribute('aria-pressed', String(on));
+  sw.addEventListener('click', async () => {
+    navigator.vibrate?.(12);
+    try { await call('POST', '/r/fire', { celebrate: !on }); } catch (err) { if (err.auth) return needPairing(); }
+    return refresh();
+  });
+  app.replaceChildren(sw, mySection, quickSection);
 }
 
 function needPairing() {
