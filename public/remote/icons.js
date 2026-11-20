@@ -28,6 +28,7 @@ const ICONS = {
   stars: '<path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 16.9 6.6 19.8l1.1-6.1L3.2 9.4l6.1-.8z"/>',
   coins: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/>',
   snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/>',
+  balloons: '<ellipse cx="9" cy="8" rx="4" ry="5"/><ellipse cx="16.5" cy="9" rx="3" ry="4"/><path d="M9 13c0 3 2 4 2 8M16.5 13c0 3-2 4-3 7"/>',
   giftrain: '<rect x="4" y="10" width="16" height="10" rx="1.5"/><path d="M3 7h18v3H3zM12 7v13M12 7c-1.5-3.5-5-3.5-5-1.5S9.5 7 12 7zm0 0c1.5-3.5 5-3.5 5-1.5S14.5 7 12 7z"/>',
   border: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><rect x="7.5" y="7.5" width="9" height="9" rx="1.5" stroke-dasharray="2 2.5"/>',
 };

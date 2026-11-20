@@ -435,7 +435,7 @@ function ruleEditor(rule) {
         visual.length ? null : 'Thêm tệp ở mục Hiển thị → Thư viện.'),
       field('Âm thanh', select(a, 'sound', [['none', 'Không'], ...sounds.map((s) => [s.id, s.name]), ...audio.map((m) => [`file:${m}`, m])], render))),
     a.media ? h('div.grid2', null,
-      field('Cách hiện', select(a, 'mediaFit', [['cover', 'Phủ kín màn hình'], ['center', 'Nhỏ ở giữa']])),
+      field('Cách hiện', select(a, 'mediaFit', [['cover', 'Phủ kín màn hình'], ['top', 'Nửa trên màn hình'], ['bottom', 'Nửa dưới màn hình'], ['center', 'Nhỏ ở giữa']])),
       isVideo && field('Xoá nền video', select(a, 'mediaKey', [['none', 'Không (video WebM trong suốt hoặc phủ kín)'], ['black', 'Xoá nền đen'], ['green', 'Xoá nền xanh lá']]),
         'Dùng khi video hiệu ứng có nền đen hoặc nền xanh, để vẫn thấy hình live phía sau.')) : null,
     h('h3', null, 'Điều khiển OBS (cần bật “Nối OBS” ở mục Nhạc và nhịp)'),
@@ -920,6 +920,12 @@ function extrasCards() {
         field('Số người', numInput(x.topLikes, 'max', { min: 1, max: 10 })),
         field('Vị trí', select(x.topLikes, 'position', CORNERS))) : h('p.small.muted', null, 'Bảng xếp hạng những người thả tim nhiều nhất trong buổi live.')),
     h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Bảng hàng đợi trên sóng'), toggle(x.queueBoard, 'enabled', null, render)),
+      x.queueBoard.enabled ? h('div.grid3', null,
+        field('Tiêu đề', textInput(x.queueBoard, 'title')),
+        field('Số dòng', numInput(x.queueBoard, 'max', { min: 1, max: 8 })),
+        field('Vị trí', select(x.queueBoard, 'position', CORNERS))) : h('p.small.muted', null, 'Cho khán giả thấy video nào sắp được phát và của ai, khi có nhiều quà dồn lại.')),
+    h('section.card', null,
       h('div.card-head', null, h('h2', null, 'Quà to nhất'), toggle(x.bestGift, 'enabled', null, render)),
       x.bestGift.enabled ? h('div.grid2', null,
         field('Tiêu đề', textInput(x.bestGift, 'title')),
@@ -1018,12 +1024,35 @@ function logRow(e) {
     h('span.what', null, h('b', null, e.nickname || e.user || 'Ai đó'), ` ${what}`,
       ran.length ? h('small', null, `Đã chạy: ${ran.join(', ')}`) : null));
 }
+const HOOK_EVENTS = [['gift', 'Quà'], ['follow', 'Follow'], ['share', 'Chia sẻ'], ['donate', 'Chuyển khoản'], ['like', 'Tim'], ['chat', 'Bình luận'], ['jar', 'Hũ đầy'], ['game', 'Trò chơi'], ['timer', 'Hết giờ']];
+
+function webhookCard() {
+  const w = S.config.webhook;
+  const st = S.status.webhook || { sent: 0, failed: 0, lastError: '' };
+  const okUrl = /^https?:\/\/\S+$/i.test(w.url);
+  return h('section.card', null,
+    h('div.card-head', null, h('h2', null, 'Gửi sự kiện ra ngoài (webhook)'), toggle(w, 'enabled', null, render)),
+    h('p.small.muted', null, 'Mỗi sự kiện được gửi dạng JSON tới một địa chỉ bạn nhập, để nối với Discord, n8n, Make, Google Sheets… Chỉ gửi sự kiện thật, không gửi sự kiện giả lập.'),
+    w.enabled ? [
+      field('Địa chỉ nhận', textInput(w, 'url', { placeholder: 'https://…', inputMode: 'url' }, render),
+        w.url && !okUrl ? 'Địa chỉ phải bắt đầu bằng https:// hoặc http://' : null),
+      h('div.field', null, h('span', null, 'Gửi những sự kiện nào'),
+        h('div.checks', null, HOOK_EVENTS.map(([id, name]) => h('label.check', null,
+          h('input', { type: 'checkbox', checked: w.events.includes(id), onchange: (e) => {
+            w.events = e.target.checked ? [...w.events, id] : w.events.filter((x) => x !== id);
+            save();
+          } }), h('span', null, name))))),
+      h(`p.note${st.lastError ? '.err' : ''}`, { role: 'status' }, st.lastError || `Đã gửi ${st.sent} sự kiện${st.failed ? `, lỗi ${st.failed}` : ''}.`),
+    ] : null);
+}
+
 function viewLog() {
   return h('div.view', null,
     head('Nhật ký', 'Các sự kiện vừa nhận từ phiên live, mới nhất ở trên.'),
     h('section.card', null, S.log.length
       ? h('div.log', { id: 'log' }, [...S.log].reverse().map(logRow))
-      : h('p.empty', null, 'Chưa có sự kiện nào. Kết nối TikTok hoặc bấm thử ở mục Bắt đầu.')));
+      : h('p.empty', null, 'Chưa có sự kiện nào. Kết nối TikTok hoặc bấm thử ở mục Bắt đầu.')),
+    webhookCard());
 }
 
 // --- Khung chung ------------------------------------------------------------

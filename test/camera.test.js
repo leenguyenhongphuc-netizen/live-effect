@@ -448,3 +448,28 @@ test('trò chơi Hộp bí ẩn: gõ số để mở, trúng bẫy thì thua, kh
     real.close();
   } finally { g.close(); }
 });
+
+test('webhook gửi ra ngoài: đúng sự kiện, đúng dữ liệu, không gửi sự kiện giả lập', async () => {
+  const { Webhook, validHookUrl } = await import('../src/webhook.js');
+  assert.deepEqual(['https://a.b/x', 'http://127.0.0.1:5678/hook', 'ftp://a.b', 'javascript:alert(1)', 'abc', ''].map(validHookUrl), [true, true, false, false, false, false]);
+  const cfg = { webhook: { enabled: true, url: 'https://hook.example/in', events: ['gift', 'follow'] } };
+  const calls = [];
+  let fail = false;
+  const fetchImpl = async (url, opts) => { calls.push([url, opts.method, JSON.parse(opts.body), opts.redirect]); if (fail) throw new Error('mạng'); return { ok: true, status: 200 }; };
+  const hook = new Webhook({ getConfig: () => cfg, fetchImpl });
+  assert.equal(hook.send({ type: 'gift', user: 'an', nickname: 'An', giftName: 'Rose', count: 3, coins: 3, avatar: 'https://cdn/a.jpg', fired: ['r-gift'], at: 1_700_000_000_000 }), true);
+  assert.equal(hook.send({ type: 'chat', text: 'chào' }), false); // loại sự kiện chưa chọn
+  assert.equal(hook.send({ type: 'gift', coins: 5, simulated: true }), false);
+  await wait(20);
+  assert.deepEqual(calls, [['https://hook.example/in', 'POST', { source: 'live-effect', at: '2023-11-14T22:13:20.000Z', event: { type: 'gift', user: 'an', nickname: 'An', giftName: 'Rose', count: 3, coins: 3 } }, 'error']]);
+  assert.deepEqual(hook.status, { sent: 1, failed: 0, lastError: '' });
+  fail = true;
+  hook.send({ type: 'follow', user: 'b' });
+  await wait(20);
+  assert.equal(hook.status.failed, 1);
+  assert.match(hook.status.lastError, /Không gửi được/);
+  cfg.webhook.url = 'javascript:alert(1)';
+  assert.equal(hook.send({ type: 'follow', user: 'c' }), false);
+  cfg.webhook = { enabled: false, url: 'https://hook.example/in', events: ['follow'] };
+  assert.equal(hook.send({ type: 'follow', user: 'c' }), false);
+});

@@ -13,7 +13,8 @@ const clock = (s) => {
 export class Extras {
   constructor(root) {
     this.cfg = null;
-    this.box = { timer: el('div', 'xw'), likes: el('div', 'xw'), best: el('div', 'xw') };
+    this.box = { timer: el('div', 'xw'), likes: el('div', 'xw'), best: el('div', 'xw'), queue: el('div', 'xw') };
+    this.queue = [];
     for (const [k, node] of Object.entries(this.box)) { node.id = `x${k}`; node.hidden = true; root.append(node); }
     this.timer = { running: false, endsAt: 0, remaining: 0, title: '' };
     this.likes = { title: '', rows: [] };
@@ -27,6 +28,8 @@ export class Extras {
     this.box.timer.dataset.pos = cfg.timer.position;
     this.box.likes.dataset.pos = cfg.topLikes.position;
     this.box.best.dataset.pos = cfg.bestGift.position;
+    this.box.queue.dataset.pos = cfg.queueBoard.position;
+    this.drawQueue();
     this.drawTimer();
     this.drawLikes();
     this.drawBest();
@@ -66,6 +69,22 @@ export class Extras {
       list.append(li);
     });
     node.replaceChildren(el('div', 'xt', this.likes.title), list);
+  }
+
+  onQueue(msg) { this.queue = Array.isArray(msg.rows) ? msg.rows : []; this.drawQueue(); }
+
+  drawQueue() {
+    const node = this.box.queue;
+    const cfg = this.cfg?.queueBoard;
+    node.hidden = !(cfg?.enabled && this.queue.length);
+    if (node.hidden) return;
+    const list = el('ol', 'xrows');
+    this.queue.slice(0, cfg.max).forEach((r, i) => {
+      const li = el('li');
+      li.append(el('span', 'rank', String(i + 1)), el('span', 'who', r.who ? `${r.who} · ${r.label}` : r.label));
+      list.append(li);
+    });
+    node.replaceChildren(el('div', 'xt', cfg.title), list);
   }
 
   onBest(msg) { this.best = msg; this.drawBest(); }

@@ -83,6 +83,32 @@ const DRAW = {
     ctx.arc(0, 0, p.size * 0.9, 0, TAU);
     ctx.fill();
   },
+  balloon(ctx, p) {
+    const s = p.size;
+    // Dây treo và món quà đung đưa bên dưới quả bóng.
+    const swing = Math.sin(p.phase + p.life * 2.2) * 0.25;
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = Math.max(1, s * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(0, s * 1.15);
+    ctx.quadraticCurveTo(s * swing, s * 1.9, s * swing * 1.6, s * 2.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * 0.92, s * 1.12, 0, 0, TAU);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.16, s * 1.08); ctx.lineTo(s * 0.16, s * 1.08); ctx.lineTo(0, s * 1.3); ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(-s * 0.32, -s * 0.42, s * 0.2, s * 0.32, -0.5, 0, TAU);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fill();
+    ctx.save();
+    ctx.translate(s * swing * 1.6, s * 3.1);
+    DRAW.gift(ctx, { ...p, rot: swing, size: s * 0.72 });
+    ctx.restore();
+  },
   gift(ctx, p) {
     ctx.rotate(p.rot);
     const s = p.size;
@@ -234,6 +260,16 @@ export class Fx {
       kind: 'dot', x: rand(-0.05, 1.05) * w, y: -u * 2, vy: rand(7, 16) * u, vx: rand(-2, 2) * u,
       size: rand(0.25, 0.85) * u, color: 'rgba(255,255,255,0.92)',
       sway: u * rand(3, 9), swayF: rand(0.6, 1.6), max: rand(7, 11), fadeIn: 0.4, fadeOut: 1.5,
+    }));
+  }
+
+  fx_balloons(k, d, image) {
+    const { w, h, u } = this;
+    const im = this.image(image);
+    this.emitter(Math.min(d, 8), 5 * k, () => this.add({
+      kind: 'balloon', img: im, x: rand(0.06, 0.94) * w, y: h + u * 6, vy: -rand(13, 22) * u,
+      size: rand(2.4, 3.6) * u, color: pick(['#ff4d5e', '#3aa0ff', '#2ed3a1', '#b476ff', '#ffb020']),
+      sway: u * rand(3, 9), swayF: rand(0.8, 1.6), max: rand(5, 7), fadeIn: 0.3, fadeOut: 1,
     }));
   }
 

@@ -78,7 +78,7 @@ try {
 
   // Bảng hiệu ứng: bấm từng ô.
   await desk.click('#nav >> text=Bảng hiệu ứng');
-  for (const name of ['Pháo giấy', 'Pháo hoa', 'Trái tim bay', 'Sao rơi', 'Mưa xu', 'Tuyết rơi', 'Mưa quà']) {
+  for (const name of ['Pháo giấy', 'Pháo hoa', 'Trái tim bay', 'Sao rơi', 'Mưa xu', 'Tuyết rơi', 'Mưa quà', 'Bóng bay quà']) {
     await desk.click('#clear-all');
     await desk.click(`.tile:has-text("${name}")`);
     await sleep(500);
@@ -188,8 +188,9 @@ try {
   await desk.screenshot({ path: path.join(shots, '17-nhac-va-nhip.png') });
   await checkLayout(desk, 'Nhạc và nhịp');
   await desk.click('.card-head .switch');
-  await sleep(900);
-  note(await frame().evaluate(() => !window.__overlay.react.running && window.__overlay.react.embers.length === 0), 'Nhạc và nhịp: tắt công tắc thì lớp hiệu ứng nhạc tắt hẳn');
+  // Chờ tối đa 4 giây thay vì một khoảng cố định: máy chậm thì khung hình cuối đến muộn hơn.
+  const musicOff = await frame().waitForFunction(() => !window.__overlay.react.running && window.__overlay.react.embers.length === 0, null, { timeout: 4000 }).then(() => true, () => false);
+  note(musicOff, 'Nhạc và nhịp: tắt công tắc thì lớp hiệu ứng nhạc tắt hẳn');
 
   // Hũ quà: bật, thả quà, các món phải nằm yên trong lòng hũ; đủ xu thì vỡ.
   await desk.click('#clear-all');

@@ -91,7 +91,7 @@ function nextMedia() {
   // Video cần xoá nền thì vẽ qua canvas; phần tử video gốc chỉ để giải mã và phát tiếng.
   const keyed = isVideo && key !== 'none' ? keyedCanvas(source, key) : null;
   const node = keyed || source;
-  node.className = fit === 'center' ? 'center' : 'cover';
+  node.className = ['center', 'top', 'bottom'].includes(fit) ? fit : 'cover';
   let done = false;
   const finish = () => {
     if (done) return;
@@ -292,6 +292,7 @@ function onMessage(msg) {
       // Vừa có người mở trúng bẫy: thêm tiếng nổ và viền đỏ cho rõ khoảnh khắc.
       if (has('game') && game.setState(msg) && has('fx')) { playSound('boom', preview); flashBorder(1.6); }
       break;
+    case 'queueboard': extras.onQueue(msg); break;
     case 'timer': extras.onTimer(msg); break;
     case 'toplikes': extras.onLikes(msg); break;
     case 'bestgift': extras.onBest(msg); break;

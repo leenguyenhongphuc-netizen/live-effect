@@ -12,6 +12,12 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
   mở trong Chrome (nhận giọng nói và bộ dịch có sẵn của trình duyệt), không cần khoá API.
 - **Camera chuyển động (OBS)**: zoom vào, kéo ra, rung, nghiêng, xoay theo nút bấm, theo quà hoặc giật theo nhịp nhạc;
   xong mỗi lần camera trở về đúng chỗ cũ.
+- **Hàng đợi hiệu ứng**: video toàn màn hình phát lần lượt theo ưu tiên; có nút *Tạm dừng hiệu ứng* (quà mới vẫn xếp hàng).
+- **Chào khách theo bậc** và **sổ fan**: khách đặc biệt, top tặng quà, cấp người xem, đội fan, khách quen, khách lâu ngày quay lại.
+- **Đồng hồ đếm giờ live** (quà cộng giờ), **top thả tim**, **quà to nhất**, **bảng hàng đợi trên sóng**.
+- **Điều khiển OBS theo kịch bản**: đổi cảnh rồi tự quay về, ẩn hiện nguồn.
+- **Trò chơi Hộp bí ẩn**: khán giả gõ số để mở hộp, ai mở trúng bẫy thì thua.
+- **Webhook gửi ra ngoài**: đẩy sự kiện sang Discord, n8n, Make…
 - **Hũ quà**: quà rơi vào một chiếc hũ trên màn hình, xếp chồng lên nhau; đủ số xu thì hũ vỡ ra ăn mừng rồi bắt đầu lại.
 - **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.

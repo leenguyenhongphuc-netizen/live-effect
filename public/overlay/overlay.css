@@ -201,3 +201,9 @@ html, body {
 .game .box.trap b { color: #1d0609; }
 .game .box.trap span { color: #1d0609; font-weight: 700; }
 @keyframes trap-hit { 0% { transform: scale(0.6); } 55% { transform: scale(1.22); } 100% { transform: scale(1); } }
+
+/* Video nửa màn hình: chỉ chiếm nửa trên hoặc nửa dưới, nửa còn lại vẫn thấy hình live. */
+#media > .top, #media > .bottom { position: absolute; left: 0; width: 100vw; height: 50vh; object-fit: cover; animation-name: media-fade; }
+#media > .top { top: 0; }
+#media > .bottom { bottom: 0; }
+#xqueue { width: calc(var(--u) * 27); }

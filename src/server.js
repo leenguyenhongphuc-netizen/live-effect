@@ -15,6 +15,7 @@ import { FanBook } from './fans.js';
 import { Greeter, TIERS } from './greet.js';
 import { LiveExtras } from './extras.js';
 import { BoxGame } from './game.js';
+import { Webhook } from './webhook.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -69,12 +70,13 @@ function sameKey(given, expected) {
  * Khởi động lõi ứng dụng: máy chủ HTTP + WebSocket chỉ nghe trên máy này.
  * @returns {Promise<object>} điều khiển ứng dụng (url, fireRule, close...)
  */
-export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source, twitch: twitchInjected, sepay: sepayInjected, obs = addToObs, obsPort } = {}) {
+export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source, twitch: twitchInjected, sepay: sepayInjected, obs = addToObs, obsPort, hookFetch } = {}) {
   const store = new Store(dataDir);
   const tiktok = source || new TikTokSource();
   const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
   tiktok.catalog = catalog;
   const jar = new Jar(() => store.config);
+  const webhook = new Webhook({ getConfig: () => store.config, fetchImpl: hookFetch, onStatus: () => broadcast('panel', statusMsg()) });
   const camera = new ObsCamera({ getConfig: () => store.config, port: obsPort, onStatus: () => broadcast('panel', statusMsg()) });
   const twitch = twitchInjected || new TwitchSource();
   const sepay = sepayInjected || new SepaySource();
@@ -93,6 +95,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const statusMsg = () => ({
     type: 'status', tiktok: tiktok.status, twitch: twitch.status, donate: sepay.status, overlays: overlayCount(), hotkeyErrors,
     camera: camera.status,
+    webhook: webhook.status,
   });
   const widgetsMsg = () => {
     const w = store.config.widgets;
@@ -144,7 +147,11 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (msg.source) camera.source(msg.source, msg.sourceMode, msg.duration);
       broadcast('overlay', msg);
     },
-    onChange: () => { broadcast('panel', { type: 'queue', queue: queue.state() }); },
+    onChange: () => {
+      broadcast('panel', { type: 'queue', queue: queue.state() });
+      // Bảng hàng đợi trên sóng: chỉ liệt kê các video đang chờ.
+      broadcast('overlay', { type: 'queueboard', rows: queue.state().waiting.filter((w) => w.media).slice(0, 8).map((w) => ({ label: w.label || 'Hiệu ứng', who: w.who })) });
+    },
   });
   const fans = new FanBook(path.join(dataDir, 'fans.json'));
   const greeter = new Greeter({ getConfig: () => store.config, fans, fire: (msg) => queue.push(msg) });
@@ -167,6 +174,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
   const record = (ev, fired) => {
     const entry = { ...ev, at: Date.now(), fired };
+    webhook.send(entry);
     log.push(entry);
     if (log.length > 200) log.shift();
     broadcast('panel', { type: 'event', event: entry });

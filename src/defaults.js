@@ -9,6 +9,7 @@ export const EFFECTS = [
   { id: 'coins', name: 'Mưa xu' },
   { id: 'snow', name: 'Tuyết rơi' },
   { id: 'giftrain', name: 'Mưa quà' },
+  { id: 'balloons', name: 'Bóng bay quà' },
   { id: 'border', name: 'Viền sáng' },
 ];
 
@@ -107,11 +108,13 @@ export function defaultConfig() {
     captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
     jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
     greet: { enabled: false, once: true, tiers: defaultGreetTiers() },
+    webhook: { enabled: false, url: '', events: ['gift', 'follow', 'share', 'donate'] },
     game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
       topLikes: { enabled: false, title: 'Top thả tim', max: 3, position: 'bottom-left' },
       bestGift: { enabled: false, title: 'Quà to nhất', position: 'bottom-right' },
+      queueBoard: { enabled: false, title: 'Sắp phát', max: 4, position: 'top-left' },
     },
     camera: { enabled: false, source: '', beat: 'off', amount: 2 },
     music: {
@@ -217,7 +220,7 @@ function sanitizeRule(input, index) {
       text: str(a.text, 140),
       sound,
       media,
-      mediaFit: oneOf(a.mediaFit, ['cover', 'center'], 'cover'),
+      mediaFit: oneOf(a.mediaFit, ['cover', 'center', 'top', 'bottom'], 'cover'),
       mediaKey: oneOf(a.mediaKey, ['none', 'black', 'green'], 'none'),
       camera: oneOf(a.camera, ['none', 'zoomin', 'zoomout', 'shake', 'tilt', 'spin'], 'none'),
       scene: str(a.scene, 120),
@@ -342,6 +345,15 @@ export function sanitizeConfig(input) {
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
     greet: { enabled: bool(gr.enabled, false), once: bool(gr.once, true), tiers: greetTiers },
+    webhook: (() => {
+      const wh = c.webhook && typeof c.webhook === 'object' ? c.webhook : {};
+      const known = ['gift', 'follow', 'share', 'like', 'chat', 'join', 'donate', 'jar', 'game', 'timer'];
+      return {
+        enabled: bool(wh.enabled, false),
+        url: str(wh.url, 500).trim(),
+        events: Array.isArray(wh.events) ? known.filter((e) => wh.events.includes(e)) : ['gift', 'follow', 'share', 'donate'],
+      };
+    })(),
     game: (() => {
       const gm = c.game && typeof c.game === 'object' ? c.game : {};
       return {
@@ -365,6 +377,7 @@ export function sanitizeConfig(input) {
         },
         topLikes: { enabled: bool(tl.enabled, false), title: str(tl.title, 30) || 'Top thả tim', max: Math.round(num(tl.max, 1, 10, 3)), position: corner(tl.position, 'bottom-left') },
         bestGift: { enabled: bool(bg.enabled, false), title: str(bg.title, 30) || 'Quà to nhất', position: corner(bg.position, 'bottom-right') },
+        queueBoard: { enabled: bool(ex.queueBoard?.enabled, false), title: str(ex.queueBoard?.title, 30) || 'Sắp phát', max: Math.round(num(ex.queueBoard?.max, 1, 8, 4)), position: corner(ex.queueBoard?.position, 'top-left') },
       };
     })(),
     jar: {
