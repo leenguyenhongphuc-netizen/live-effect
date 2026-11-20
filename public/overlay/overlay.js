@@ -291,6 +291,7 @@ function onMessage(msg) {
       if (has('extras')) extras.setConfig(msg.extras);
       if (has('game')) game.setConfig(msg.game);
       if (has('scenery')) scenery.setConfig(msg.scenery);
+      if (has('extras')) extras.setAuctionPos(msg.auction?.position);
       if (has('bgm')) bgm.setConfig(msg.bgm);
       break;
     case 'audio': if (has('fx')) react.onAudio(msg); break;
@@ -300,6 +301,7 @@ function onMessage(msg) {
       if (has('game') && game.setState(msg) && has('fx')) { playSound('boom', preview); flashBorder(1.6); }
       break;
     case 'bgm': if (has('bgm')) bgm.cmd(msg); break;
+    case 'auction': if (has('extras')) extras.onAuction(msg); break;
     case 'queueboard': extras.onQueue(msg); break;
     case 'timer': extras.onTimer(msg); break;
     case 'toplikes': extras.onLikes(msg); break;

@@ -289,10 +289,25 @@ try {
   }
   await sleep(400);
   note(await frame().locator('#game.over .box.trap').count() === 1, 'Trò chơi: mở trúng bẫy thì bàn chơi báo người thua');
-  note((await desk.locator('.card-head h2').last().textContent()).includes('đã mở trúng hộp'), 'Trò chơi: bảng điều khiển báo kết quả ván');
+  note((await desk.locator('.card:has(.board) .card-head h2').textContent()).includes('đã mở trúng hộp'), 'Trò chơi: bảng điều khiển báo kết quả ván');
   await desk.click('button:has-text("Ván mới")');
   await sleep(400);
   note(await frame().locator('#game .box.open, #game .box.trap').count() === 0, 'Trò chơi: ván mới thì mọi hộp đóng lại');
+  // Đấu giá: bắt đầu, hai người trả giá bằng quà, chốt thì công bố người thắng.
+  await desk.fill('input[placeholder^="Ví dụ: 1 bài hát"]', 'Một bài hát');
+  await sleep(600);
+  await desk.click('text=Bắt đầu đấu giá');
+  await desk.waitForSelector('text=Chốt ngay');
+  app.ingest({ type: 'gift', user: 'an', nickname: 'An', giftId: '5655', giftName: 'Rose', count: 30, coins: 30 });
+  app.ingest({ type: 'gift', user: 'binh', nickname: 'Bình', giftId: '5655', giftName: 'Rose', count: 80, coins: 80 });
+  await sleep(700);
+  const au = await frame().evaluate(() => ({ title: document.querySelector('#xauction .xt')?.textContent, rows: [...document.querySelectorAll('#xauction .who')].map((n) => n.textContent) }));
+  note(au.title === 'Đấu giá: Một bài hát' && au.rows.join(',') === 'Bình,An', `Đấu giá: bảng trên sóng xếp đúng người trả giá (${au.rows.join(', ')})`);
+  await desk.screenshot({ path: path.join(shots, '26-dau-gia.png') });
+  await checkLayout(desk, 'Trò chơi (đấu giá)');
+  await desk.click('text=Chốt ngay');
+  await sleep(600);
+  note((await frame().locator('#xauction .win').textContent()).includes('Bình thắng với 80 xu'), 'Đấu giá: chốt thì công bố đúng người thắng');
   await desk.click('.card-head .switch');
   await sleep(500);
   await desk.click('#clear-all');

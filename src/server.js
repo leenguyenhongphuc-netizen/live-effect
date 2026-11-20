@@ -16,6 +16,7 @@ import { Greeter, TIERS } from './greet.js';
 import { LiveExtras } from './extras.js';
 import { BoxGame } from './game.js';
 import { Webhook } from './webhook.js';
+import { Auction } from './auction.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -109,6 +110,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       extras: store.config.extras,
       game: store.config.game,
       scenery: store.config.scenery,
+      auction: store.config.auction,
       bgm: store.config.bgm,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
@@ -164,6 +166,11 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     // Hết giờ: chạy các kịch bản có sự kiện "Hết giờ đếm ngược".
     onTimeUp: () => { const ev = { type: 'timer', nickname: 'Đồng hồ' }; record(ev, engine.handle(ev)); },
   });
+  const auction = new Auction({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); broadcast('panel', msg); },
+    onWin: (ev) => record(ev, engine.handle(ev)),
+  });
   const game = new BoxGame({
     getConfig: () => store.config,
     emit: (msg) => { broadcast('overlay', msg); broadcast('panel', msg); },
@@ -195,6 +202,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     // Sổ fan và chào khách: ghi nhận người vào phòng, chào theo bậc; cộng xu cho người tặng quà.
     if (ev.type === 'gift' && !ev.simulated) fans.addCoins(ev.user, ev.nickname, ev.coins);
     extras.onEvent(ev);
+    if (ev.type === 'gift') auction.onGift(ev);
     if (ev.type === 'chat') game.handleChat(ev);
     // Khán giả chọn bài: gõ "!nhac 3" để phát bài số 3 trong danh sách nhạc nền.
     if (ev.type === 'chat' && store.config.bgm.enabled && store.config.bgm.requests) {
@@ -370,6 +378,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     queue: queue.state(),
     timer: extras.timerState(),
     game: game.state(),
+    auctionState: auction.state(),
     fans: { size: fans.size, top: fans.top(10) },
     catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS, greetTiers: TIERS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
@@ -513,6 +522,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
       greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
       return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/auction') {
+      const body = await readJson(req);
+      if (body.action === 'start') auction.start({ item: body.item, seconds: body.seconds });
+      else if (body.action === 'finish') auction.finish();
+      else if (body.action === 'cancel') auction.cancel();
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { auction: auction.state() });
     }
 
     if (route === 'POST /api/bgm') {
@@ -693,6 +711,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
         ws.send(JSON.stringify(engine.goalState()));
         ws.send(JSON.stringify(jar.state()));
         ws.send(JSON.stringify(game.state()));
+        ws.send(JSON.stringify(auction.state()));
         for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) ws.send(JSON.stringify(m));
         ws.send(JSON.stringify(engine.topState()));
       } else {
@@ -761,6 +780,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       fans.save();
       extras.close();
       game.close();
+      auction.close();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();
       await new Promise((r) => server.close(r));

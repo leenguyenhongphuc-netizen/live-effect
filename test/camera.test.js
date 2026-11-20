@@ -473,3 +473,46 @@ test('webhook gửi ra ngoài: đúng sự kiện, đúng dữ liệu, không g�
   cfg.webhook = { enabled: false, url: 'https://hook.example/in', events: ['follow'] };
   assert.equal(hook.send({ type: 'follow', user: 'c' }), false);
 });
+
+test('đấu giá: tổng xu là giá trả, quà giây cuối kéo dài giờ, hết giờ công bố người thắng', async () => {
+  const { Auction } = await import('../src/auction.js');
+  let now = 5_000_000;
+  const cfg = { auction: { item: 'Một bài hát', seconds: 60, extend: true } };
+  const wins = [];
+  const out = [];
+  const a = new Auction({ getConfig: () => cfg, emit: (m) => out.push(m), onWin: (e) => wins.push(e), now: () => now });
+  try {
+    a.onGift({ user: 'x', coins: 100 }); // chưa bắt đầu thì không tính
+    a.start({});
+    assert.deepEqual([a.state().item, a.remaining(), a.state().rows.length], ['Một bài hát', 60, 0]);
+    a.onGift({ user: 'an', nickname: 'An', coins: 50 });
+    now += 1000;
+    a.onGift({ user: 'binh', nickname: 'Bình', coins: 80 });
+    now += 1000;
+    a.onGift({ user: 'an', nickname: 'An', coins: 30 }); // An lên 80, bằng Bình nhưng đạt sau
+    assert.deepEqual(a.rows().map((r) => [r.name, r.coins]), [['Bình', 80], ['An', 80]]);
+    // Còn 5 giây mà có quà: kéo dài lên 10 giây.
+    now += 53_000;
+    assert.equal(a.remaining(), 5);
+    a.onGift({ user: 'an', nickname: 'An', coins: 1 });
+    assert.equal(a.remaining(), 10);
+    cfg.auction.extend = false;
+    now += 8000;
+    a.onGift({ user: 'binh', nickname: 'Bình', coins: 5 });
+    assert.equal(a.remaining(), 2); // tắt kéo dài thì giữ nguyên giờ
+    a.finish();
+    assert.deepEqual(wins, [{ type: 'auction', nickname: 'Bình', avatar: '', coins: 85, giftName: 'Một bài hát' }]);
+    assert.deepEqual([a.state().running, a.state().winner.name], [false, 'Bình']);
+    a.onGift({ user: 'an', coins: 999 }); // sau khi chốt thì không tính nữa
+    assert.equal(a.state().winner.coins, 85);
+    // Không ai trả giá: kết thúc mà không có người thắng.
+    a.start({ item: 'Món khác', seconds: 5 });
+    assert.equal(a.remaining(), 10); // thời gian tối thiểu 10 giây
+    a.finish();
+    assert.equal(wins.length, 1);
+    assert.equal(a.state().winner.name, '');
+    a.start({});
+    a.cancel();
+    assert.deepEqual([a.state().running, a.state().winner, a.state().bidders], [false, null, 0]);
+  } finally { a.close(); }
+});

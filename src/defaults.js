@@ -33,6 +33,7 @@ export const TRIGGERS = [
   { id: 'jar', name: 'Hũ quà đầy' },
   { id: 'timer', name: 'Hết giờ đếm ngược' },
   { id: 'game', name: 'Trò chơi: có người mở trúng hộp bẫy' },
+  { id: 'auction', name: 'Đấu giá: có người thắng' },
   { id: 'button', name: 'Nút bấm tay (điện thoại, phím tắt)' },
 ];
 
@@ -111,6 +112,7 @@ export function defaultConfig() {
     webhook: { enabled: false, url: '', events: ['gift', 'follow', 'share', 'donate'] },
     scenery: { enabled: false, media: '', key: 'none', opacity: 1 },
     bgm: { enabled: false, tracks: [], volume: 0.5, duck: 'lower', shuffle: false, showCard: true, requests: true, position: 'top-left' },
+    auction: { item: '', seconds: 120, extend: true, position: 'top-right' },
     game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
@@ -378,6 +380,15 @@ export function sanitizeConfig(input) {
         enabled: bool(wh.enabled, false),
         url: str(wh.url, 500).trim(),
         events: Array.isArray(wh.events) ? known.filter((e) => wh.events.includes(e)) : ['gift', 'follow', 'share', 'donate'],
+      };
+    })(),
+    auction: (() => {
+      const au = c.auction && typeof c.auction === 'object' ? c.auction : {};
+      return {
+        item: str(au.item, 60),
+        seconds: Math.round(num(au.seconds, 10, 3600, 120)),
+        extend: bool(au.extend, true),
+        position: oneOf(au.position, ['top-left', 'top-right', 'bottom-left', 'bottom-right'], 'top-right'),
       };
     })(),
     game: (() => {

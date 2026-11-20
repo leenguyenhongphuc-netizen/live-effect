@@ -13,13 +13,15 @@ const clock = (s) => {
 export class Extras {
   constructor(root) {
     this.cfg = null;
-    this.box = { timer: el('div', 'xw'), likes: el('div', 'xw'), best: el('div', 'xw'), queue: el('div', 'xw') };
+    this.box = { timer: el('div', 'xw'), likes: el('div', 'xw'), best: el('div', 'xw'), queue: el('div', 'xw'), auction: el('div', 'xw') };
+    this.auction = null;
+    this.auctionPos = 'top-right';
     this.queue = [];
     for (const [k, node] of Object.entries(this.box)) { node.id = `x${k}`; node.hidden = true; root.append(node); }
     this.timer = { running: false, endsAt: 0, remaining: 0, title: '' };
     this.likes = { title: '', rows: [] };
     this.best = { title: '', best: null };
-    setInterval(() => { if (this.timer.running) this.drawTimer(); }, 250);
+    setInterval(() => { if (this.timer.running) this.drawTimer(); if (this.auction?.running) this.drawAuction(); }, 250);
   }
 
   setConfig(cfg) {
@@ -69,6 +71,32 @@ export class Extras {
       list.append(li);
     });
     node.replaceChildren(el('div', 'xt', this.likes.title), list);
+  }
+
+  setAuctionPos(pos) { this.auctionPos = pos || 'top-right'; this.drawAuction(); }
+
+  onAuction(msg) {
+    this.auction = { ...msg, endsAt: Date.now() + msg.remaining * 1000 };
+    this.drawAuction();
+  }
+
+  drawAuction() {
+    const node = this.box.auction;
+    const a = this.auction;
+    node.dataset.pos = this.auctionPos;
+    node.hidden = !(a && (a.running || a.winner));
+    if (node.hidden) return;
+    const kids = [el('div', 'xt', `Đấu giá: ${a.item}`)];
+    if (a.running) {
+      kids.push(el('div', 'time', clock(Math.max(0, Math.ceil((a.endsAt - Date.now()) / 1000)))));
+      if (a.rows.length) {
+        const list = el('ol', 'xrows');
+        a.rows.forEach((r, i) => { const li = el('li'); li.append(el('span', 'rank', String(i + 1)), el('span', 'who', r.name || 'Ẩn danh'), el('span', 'num', `${nf.format(r.coins)} xu`)); list.append(li); });
+        kids.push(list);
+      } else kids.push(el('div', 'gh', 'Tặng quà để trả giá'));
+    } else if (a.winner.name) kids.push(el('div', 'win', `${a.winner.name} thắng với ${nf.format(a.winner.coins)} xu`));
+    else kids.push(el('div', 'gh', 'Kết thúc, chưa ai trả giá'));
+    node.replaceChildren(...kids);
   }
 
   onQueue(msg) { this.queue = Array.isArray(msg.rows) ? msg.rows : []; this.drawQueue(); }

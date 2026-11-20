@@ -25,7 +25,7 @@ function h(spec, props, ...kids) {
 
 const S = {
   config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
-  fans: { size: 0, top: [] }, openTier: null, game: null, timer: { running: false, remaining: 0 },
+  fans: { size: 0, top: [] }, openTier: null, game: null, auctionState: null, timer: { running: false, remaining: 0 },
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -343,6 +343,7 @@ function describe(rule) {
     jar: 'Khi hũ quà đầy',
     timer: 'Khi đồng hồ đếm ngược về 0',
     game: 'Khi có người mở trúng hộp bẫy',
+    auction: 'Khi đấu giá có người thắng',
   }[t.type];
   const a = rule.action;
   const then = [
@@ -546,6 +547,31 @@ async function gameDo(body) {
   try { S.game = (await api('POST', '/api/game', body)).game; render(); } catch (err) { toast(err.message); }
 }
 
+async function auctionDo(action) {
+  const a = S.config.auction;
+  try { S.auctionState = (await api('POST', '/api/auction', { action, item: a.item, seconds: a.seconds })).auction; render(); } catch (err) { toast(err.message); }
+}
+
+function auctionCard() {
+  const a = S.config.auction;
+  const st = S.auctionState || { running: false, rows: [], winner: null };
+  return h('section.card', null,
+    h('div.card-head', null, h('h2', null, 'Đấu giá bằng quà')),
+    h('p.muted', null, 'Trong lúc đấu giá, tổng số xu mỗi người tặng là giá họ trả. Hết giờ, người trả cao nhất thắng và tên được công bố trên sóng.'),
+    h('div.grid2', null,
+      field('Món đấu giá', textInput(a, 'item', { placeholder: 'Ví dụ: 1 bài hát theo yêu cầu' })),
+      field('Thời gian (giây)', numInput(a, 'seconds', { min: 10, max: 3600 })),
+      field('Vị trí bảng', select(a, 'position', CORNERS))),
+    toggle(a, 'extend', 'Có quà ở 10 giây cuối thì kéo dài thêm, chống “chờ sát giờ”'),
+    st.running
+      ? h('p.note.ok', { role: 'status' }, st.rows.length ? `Đang đấu giá. Dẫn đầu: ${st.rows[0].name} (${nf.format(st.rows[0].coins)} xu), ${st.bidders} người trả giá.` : 'Đang đấu giá, chưa ai trả giá.')
+      : st.winner ? h('p.note', { role: 'status' }, st.winner.name ? `Kết quả: ${st.winner.name} thắng với ${nf.format(st.winner.coins)} xu.` : 'Kết thúc, không ai trả giá.') : null,
+    h('div.btn-row', null, st.running
+      ? [h('button.btn.primary', { type: 'button', onclick: () => auctionDo('finish') }, 'Chốt ngay'), h('button.btn.ghost', { type: 'button', onclick: () => auctionDo('cancel') }, 'Huỷ đấu giá')]
+      : h('button.btn.primary', { type: 'button', onclick: () => auctionDo('start') }, 'Bắt đầu đấu giá')),
+    h('p.small.muted', null, 'Muốn ăn mừng người thắng bằng video: vào Kịch bản, tạo kịch bản với sự kiện “Đấu giá: có người thắng”.'));
+}
+
 function viewGame() {
   const g = S.config.game;
   const s = S.game;
@@ -573,7 +599,8 @@ function viewGame() {
       h('div.board', null, Array.from({ length: s.size }, (_, i) => i + 1).map((n) =>
         h(`button.cell${opened.has(n) ? (s.trap === n ? '.trap' : '.open') : ''}`, { type: 'button', disabled: opened.has(n) || Boolean(s.loser),
           'aria-label': opened.has(n) ? `Hộp ${n}, ${opened.get(n)} đã mở` : `Mở hộp ${n}`, onclick: () => gameDo({ action: 'pick', n }) },
-        h('b', null, String(n)), opened.has(n) ? h('span', null, opened.get(n)) : null)))) : null);
+        h('b', null, String(n)), opened.has(n) ? h('span', null, opened.get(n)) : null)))) : null,
+    auctionCard());
 }
 
 // --- Mục: Quà tặng ----------------------------------------------------------
@@ -1049,14 +1076,14 @@ function viewDisplay() {
 }
 
 // --- Mục: Nhật ký -----------------------------------------------------------
-const KIND = { game: 'Trò chơi', timer: 'Hết giờ', jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
+const KIND = { auction: 'Đấu giá', game: 'Trò chơi', timer: 'Hết giờ', jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
 function logRow(e) {
   const what = {
     donate: `ủng hộ ${fmtVnd(e.amount)}${e.text ? `: ${e.text}` : ''}`,
     gift: `tặng ${e.count || 1} ${e.giftName || 'quà'}${e.coins ? ` (${e.coins} xu)` : ''}`,
     like: `thả ${e.likeCount || 1} tim`,
     chat: e.text,
-    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy', timer: 'đã đếm về 0', game: `mở trúng hộp bẫy số ${e.text}`,
+    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy', timer: 'đã đếm về 0', game: `mở trúng hộp bẫy số ${e.text}`, auction: `thắng đấu giá “${e.giftName}” với ${e.coins} xu`,
   }[e.type] || '';
   const ran = (e.fired || []).map((id) => S.config.rules.find((r) => r.id === id)?.name).filter(Boolean);
   return h('div.log-row', null,
@@ -1185,6 +1212,7 @@ function connectWs() {
         if (list) list.prepend(logRow(msg.event)); else render();
       }
     } else if (msg.type === 'media') { S.media = msg.media; softRender(); }
+    else if (msg.type === 'auction') { S.auctionState = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'game') { S.game = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'timer') { S.timer = msg; if (S.view === 'display') softRender(); }
     else if (msg.type === 'queue') { S.queue = msg.queue; if (S.view === 'deck') softRender(); else renderStatus(); }
