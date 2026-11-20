@@ -113,6 +113,7 @@ export function defaultConfig() {
     scenery: { enabled: false, media: '', key: 'none', opacity: 1 },
     bgm: { enabled: false, tracks: [], volume: 0.5, duck: 'lower', shuffle: false, showCard: true, requests: true, position: 'top-left' },
     auction: { item: '', seconds: 120, extend: true, position: 'top-right' },
+    stage: { cam1: '', cam2: '', beatSwitch: 0, shows: [] },
     game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
@@ -381,6 +382,25 @@ export function sanitizeConfig(input) {
         url: str(wh.url, 500).trim(),
         events: Array.isArray(wh.events) ? known.filter((e) => wh.events.includes(e)) : ['gift', 'follow', 'share', 'donate'],
       };
+    })(),
+    stage: (() => {
+      const sg = c.stage && typeof c.stage === 'object' ? c.stage : {};
+      const shows = (Array.isArray(sg.shows) ? sg.shows : []).slice(0, 30).map((sh, i) => {
+        const tr = sh?.track ? safeMediaName(sh.track) : null;
+        const cues = (Array.isArray(sh?.cues) ? sh.cues : []).slice(0, 200).map((cu) => {
+          const md = cu?.media ? safeMediaName(cu.media) : null;
+          return {
+            t: Math.round(num(cu?.t, 0, 3600, 0) * 10) / 10,
+            effect: oneOf(cu?.effect, EFFECT_IDS, 'none'),
+            media: md && md.kind !== 'audio' ? md.name : '',
+            mediaKey: oneOf(cu?.mediaKey, ['none', 'black', 'green'], 'none'),
+            camera: oneOf(cu?.camera, ['none', 'zoomin', 'zoomout', 'shake', 'tilt', 'spin'], 'none'),
+            cam: [1, 2].includes(Number(cu?.cam)) ? Number(cu.cam) : 0,
+          };
+        }).sort((a, b) => a.t - b.t);
+        return { id: str(sh?.id, 40).replace(/[^\w-]/g, '') || `show-${i}`, name: str(sh?.name, 60) || 'Bài diễn', track: tr && tr.kind === 'audio' ? tr.name : '', cues };
+      });
+      return { cam1: str(sg.cam1, 120), cam2: str(sg.cam2, 120), beatSwitch: Math.round(num(sg.beatSwitch, 0, 64, 0)), shows };
     })(),
     auction: (() => {
       const au = c.auction && typeof c.auction === 'object' ? c.auction : {};

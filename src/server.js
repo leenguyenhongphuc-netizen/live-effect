@@ -17,6 +17,7 @@ import { LiveExtras } from './extras.js';
 import { BoxGame } from './game.js';
 import { Webhook } from './webhook.js';
 import { Auction } from './auction.js';
+import { Stage } from './stage.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -137,7 +138,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const unit = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0; };
   const relayAudio = (msg) => {
     if (!store.config.music.enabled) return;
-    if (msg.beat === true) camera.beat(unit(msg.s));
+    if (msg.beat === true) { camera.beat(unit(msg.s)); stage.onBeat(); }
     broadcast('overlay', {
       type: 'audio', b: unit(msg.b), m: unit(msg.m), h: unit(msg.h), l: unit(msg.l), beat: msg.beat === true, s: unit(msg.s),
       bands: Array.isArray(msg.bands) ? msg.bands.slice(0, 12).map((x) => Math.round(unit(Number(x) / 100) * 100)) : [],
@@ -165,6 +166,16 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     emit: (msg) => { broadcast('overlay', msg); if (msg.type === 'timer') broadcast('panel', msg); },
     // Hết giờ: chạy các kịch bản có sự kiện "Hết giờ đếm ngược".
     onTimeUp: () => { const ev = { type: 'timer', nickname: 'Đồng hồ' }; record(ev, engine.handle(ev)); },
+  });
+  const stage = new Stage({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); if (msg.type === 'stage') broadcast('panel', msg); },
+    // Mốc của bài diễn phát ngay, không xếp hàng: phải rơi đúng giây đã đặt.
+    fireCue: (cue) => {
+      if (cue.camera !== 'none') camera.move(cue.camera, { duration: 2 });
+      if (cue.effect !== 'none' || cue.media) broadcast('overlay', { type: 'fx', effect: cue.effect, intensity: 3, duration: 5, sound: 'none', media: cue.media, mediaFit: 'cover', mediaKey: cue.mediaKey, alert: '' });
+    },
+    switchCam: (i) => { camera.scene(store.config.stage[`cam${i}`], 0); },
   });
   const auction = new Auction({
     getConfig: () => store.config,
@@ -399,6 +410,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     timer: extras.timerState(),
     game: game.state(),
     auctionState: auction.state(),
+    stageState: stage.state(),
     fans: { size: fans.size, top: fans.top(10) },
     catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS, greetTiers: TIERS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
@@ -558,6 +570,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
       greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
       return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/stage') {
+      const body = await readJson(req);
+      if (body.action === 'start') { if (!stage.start(String(body.id || ''))) return sendJson(res, 404, { error: 'Không tìm thấy bài diễn' }); }
+      else if (body.action === 'stop') stage.stop();
+      else if (body.action === 'cam') stage.setCam(Number(body.cam));
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { stage: stage.state() });
     }
 
     if (route === 'POST /api/auction') {
@@ -731,6 +752,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
           try {
             const msg = JSON.parse(data);
             if (msg && msg.type === 'done' && typeof msg.id === 'string') queue.done(msg.id);
+            if (msg && msg.type === 'showEnded') stage.stop();
           } catch { /* bỏ qua tin hỏng */ }
         });
       }
@@ -818,6 +840,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       extras.close();
       game.close();
       auction.close();
+      stage.close();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();
       await new Promise((r) => server.close(r));

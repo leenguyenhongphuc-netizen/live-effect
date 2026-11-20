@@ -213,6 +213,11 @@ details.adv[open] > summary { margin-bottom: 10px; }
 .layer { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; border-top: 1px solid var(--line); }
 .layer:first-child { border-top: 0; }
 
+/* --- Sân khấu -------------------------------------------------------------- */
+.cue { display: grid; grid-template-columns: 84px repeat(5, minmax(0, 1fr)) 44px; gap: 8px; align-items: end; padding-top: 10px; border-top: 1px solid var(--line); }
+@media (max-width: 1180px) { .cue { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .cue { grid-template-columns: 1fr 1fr; } }
+
 /* --- Trò chơi -------------------------------------------------------------- */
 .board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
 .cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 64px; min-width: 0; padding: 4px;

@@ -25,7 +25,7 @@ function h(spec, props, ...kids) {
 
 const S = {
   config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
-  fans: { size: 0, top: [] }, openTier: null, game: null, auctionState: null, timer: { running: false, remaining: 0 },
+  fans: { size: 0, top: [] }, openTier: null, game: null, auctionState: null, stageState: { running: null, cam: 1 }, openShow: null, timer: { running: false, remaining: 0 },
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -56,8 +56,33 @@ function toast(text) {
 
 let saveTimer;
 let saving = false;
+let dirty = false; // có thay đổi chưa lưu xong: không nhận cấu hình máy chủ gửi về lúc này
+let saveSeq = 0;
+
+/**
+ * Chép cấu hình từ máy chủ vào ĐÚNG các đối tượng đang dùng, thay vì thay đối tượng mới.
+ * Màn hình đang mở giữ tham chiếu tới các đối tượng này; nếu thay mới, thao tác kế tiếp
+ * của người dùng sẽ sửa vào bản cũ và âm thầm không được lưu.
+ */
+function syncInto(target, src) {
+  if (Array.isArray(target) && Array.isArray(src)) {
+    target.length = src.length;
+    src.forEach((v, i) => { target[i] = merge(target[i], v); });
+    return target;
+  }
+  for (const k of Object.keys(target)) if (!(k in src)) delete target[k];
+  for (const [k, v] of Object.entries(src)) target[k] = merge(target[k], v);
+  return target;
+}
+function merge(old, next) {
+  const plain = (x) => x && typeof x === 'object';
+  return plain(old) && plain(next) && Array.isArray(old) === Array.isArray(next) ? syncInto(old, next) : next;
+}
+
 function save() {
   clearTimeout(saveTimer);
+  dirty = true;
+  const mine = ++saveSeq;
   saveTimer = setTimeout(async () => {
     saving = true;
     try {
@@ -70,6 +95,7 @@ function save() {
       toast(`Chưa lưu được: ${err.message}`);
     } finally {
       saving = false;
+      if (mine === saveSeq) dirty = false; // không còn thay đổi nào mới hơn đang chờ
     }
   }, 350);
 }
@@ -540,6 +566,71 @@ function viewGreet() {
         ? `Sổ fan đang nhớ ${nf.format(S.fans.size)} khán giả.${S.fans.top.length ? ` Tặng nhiều nhất: ${S.fans.top.slice(0, 3).map((f) => `${f.name} (${nf.format(f.coins)} xu)`).join(', ')}.` : ''}`
         : 'Sổ fan còn trống. Nó tự ghi lại khán giả vào phòng và số xu họ tặng qua từng buổi live.')),
     h('div.rules', null, S.catalog.greetTiers.map(tierBlock)));
+}
+
+// --- Mục: Sân khấu ----------------------------------------------------------
+async function stageDo(body) {
+  try { S.stageState = (await api('POST', '/api/stage', body)).stage; render(); } catch (err) { toast(err.message); }
+}
+
+function showBlock(show) {
+  const sg = S.config.stage;
+  const open = S.openShow === show.id;
+  const run = S.stageState.running?.id === show.id;
+  const ext = (m) => m.split('.').pop().toLowerCase();
+  const audio = S.media.filter((m) => S.catalog.mediaExt.audio.includes(ext(m)));
+  const visuals = S.media.filter((m) => !S.catalog.mediaExt.audio.includes(ext(m)));
+  const cueRow = (cue) => h('div.cue', null,
+    field('Giây thứ', numInput(cue, 't', { min: 0, max: 3600, step: 0.5 })),
+    field('Hiệu ứng', select(cue, 'effect', [['none', 'Không'], ...S.catalog.effects.map((e) => [e.id, e.name])])),
+    field('Clip / hình', select(cue, 'media', [['', 'Không'], ...visuals.map((m) => [m, m])])),
+    field('Xoá nền', select(cue, 'mediaKey', [['none', 'Không'], ['black', 'Nền đen'], ['green', 'Nền xanh']])),
+    field('Camera', select(cue, 'camera', [['none', 'Giữ nguyên'], ...CAM_MOVES])),
+    field('Góc máy', select(cue, 'cam', [[0, 'Giữ nguyên'], [1, 'Camera 1'], [2, 'Camera 2']], () => { cue.cam = Number(cue.cam); })),
+    h('button.btn.icon.ghost', { type: 'button', title: 'Xoá mốc', 'aria-label': 'Xoá mốc', onclick: () => { show.cues = show.cues.filter((x) => x !== cue); save(); render(); } }, icon('trash')));
+  return h('div.rule', { 'data-show': show.id },
+    h('div.rule-row', null,
+      h('span.dot' + (run ? '.ok' : ''), { 'aria-hidden': 'true' }),
+      h('div.rule-text', null, h('b', null, show.name), h('span', null, `${show.track || 'không có nhạc'} · ${show.cues.length} mốc${run ? ' · đang diễn' : ''}`)),
+      h('div.rule-actions', null,
+        run ? h('button.btn', { type: 'button', onclick: () => stageDo({ action: 'stop' }) }, 'Dừng')
+          : h('button.btn.primary', { type: 'button', onclick: () => stageDo({ action: 'start', id: show.id }) }, 'Diễn'),
+        h('button.btn', { type: 'button', 'aria-expanded': String(open), onclick: () => { S.openShow = open ? null : show.id; render(); } }, open ? 'Xong' : 'Sửa'))),
+    open ? h('div.rule-edit', null,
+      h('div.grid2', null,
+        field('Tên bài diễn', textInput(show, 'name')),
+        field('Bài nhạc', select(show, 'track', [['', 'Không có nhạc'], ...audio.map((m) => [m, m])]), audio.length ? null : 'Thêm tệp nhạc ở Hiển thị → Thư viện.')),
+      h('h3', null, 'Các mốc theo thời gian'),
+      show.cues.length ? [...show.cues].sort((a, b) => a.t - b.t).map(cueRow) : h('p.small.muted', null, 'Chưa có mốc nào. Mỗi mốc là một việc xảy ra ở đúng một giây của bài nhạc.'),
+      h('div.rule-foot', null,
+        h('button.btn', { type: 'button', onclick: () => {
+          show.cues.push({ t: (show.cues.at(-1)?.t ?? -4) + 4, effect: 'none', media: '', mediaKey: 'none', camera: 'none', cam: 0 });
+          save(); render();
+        } }, icon('plus'), 'Thêm mốc'),
+        h('button.btn.danger', { type: 'button', onclick: () => { sg.shows = sg.shows.filter((x) => x !== show); S.openShow = null; save(); render(); } }, icon('trash'), 'Xoá bài diễn'))) : null);
+}
+
+function viewStage() {
+  const sg = S.config.stage;
+  const scenes = obsScenes();
+  const sceneField = (key, label) => field(label, scenes.length
+    ? select(sg, key, [['', 'Chưa chọn'], ...scenes.map((x) => [x, x]), ...(sg[key] && !scenes.includes(sg[key]) ? [[sg[key], sg[key]]] : [])], render)
+    : textInput(sg, key, { placeholder: 'Tên cảnh trong OBS' }, render));
+  const both = sg.cam1 && sg.cam2;
+  return h('div.view', null,
+    head('Sân khấu', 'Biến buổi live thành một màn diễn: nhạc, clip, hiệu ứng và góc máy chạy khớp nhau.',
+      h('button.btn.primary', { type: 'button', onclick: () => {
+        const show = { id: `show-${Date.now().toString(36)}`, name: 'Bài diễn mới', track: '', cues: [] };
+        sg.shows.push(show); S.openShow = show.id; save(); render();
+      } }, icon('plus'), 'Thêm bài diễn')),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Hai góc máy')),
+      h('p.muted', null, 'Tạo hai cảnh trong OBS, mỗi cảnh một camera (ví dụ cận mặt và toàn thân), rồi chọn ở đây. Cần bật “Nối OBS” ở mục Nhạc và nhịp.'),
+      h('div.grid3', null,
+        sceneField('cam1', 'Camera 1 (cảnh OBS)'), sceneField('cam2', 'Camera 2 (cảnh OBS)'),
+        field('Tự đổi sau mỗi (nhịp)', numInput(sg, 'beatSwitch', { min: 0, max: 64 }), 'Đặt 0 để không tự đổi. Cần đang nghe nhạc.')),
+      h('div.btn-row', null, [1, 2].map((i) => h('button.btn' + (S.stageState.cam === i ? '.primary' : ''), { type: 'button', disabled: !both, onclick: () => stageDo({ action: 'cam', cam: i }) }, `Camera ${i}`)))),
+    h('div.rules', null, sg.shows.length ? sg.shows.map(showBlock) : h('p.empty', null, 'Chưa có bài diễn nào. Một bài diễn gồm một bài nhạc và các mốc: giây nào phát clip gì, zoom thế nào, đổi sang góc máy nào.')));
 }
 
 // --- Mục: Trò chơi ----------------------------------------------------------
@@ -1133,6 +1224,7 @@ const VIEWS = [
   ['rules', 'Kịch bản', 'rules', viewRules],
   ['gifts', 'Quà tặng', 'giftrain', viewGifts],
   ['greet', 'Chào khách', 'greet', viewGreet],
+  ['stage', 'Sân khấu', 'stage', viewStage],
   ['game', 'Trò chơi', 'game', viewGame],
   ['music', 'Nhạc và nhịp', 'music', viewMusic],
   ['captions', 'Phụ đề', 'caption', viewCaptions],
@@ -1219,13 +1311,14 @@ function connectWs() {
       const entry = S.log.find((e) => e.id === msg.id);
       if (entry) { entry.translated = msg.text; if (S.view === 'log') render(); }
     }
+    else if (msg.type === 'stage') { S.stageState = msg; if (S.view === 'stage') softRender(); }
     else if (msg.type === 'auction') { S.auctionState = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'game') { S.game = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'timer') { S.timer = msg; if (S.view === 'display') softRender(); }
     else if (msg.type === 'queue') { S.queue = msg.queue; if (S.view === 'deck') softRender(); else renderStatus(); }
     else if (msg.type === 'gifts') { S.gifts = msg.gifts; if (S.view === 'gifts') softRender(); }
     else if (msg.type === 'remote') { S.remote = msg.remote; if (S.view === 'phone') softRender(); }
-    else if (msg.type === 'config' && !saving) { S.config = msg.config; softRender(); }
+    else if (msg.type === 'config' && !saving && !dirty) { syncInto(S.config, msg.config); softRender(); }
     else if (msg.type === 'tts') speak(msg.text);
   };
   ws.onclose = () => setTimeout(connectWs, 1500);

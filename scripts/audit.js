@@ -47,7 +47,7 @@ async function checkLayout(page, name) {
   note(r.small.length === 0, `${name}: vùng bấm đủ lớn${r.small.length ? ` → ${r.small.join(' | ')}` : ''}`);
 }
 
-const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Chào khách', 'Trò chơi', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
+const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Chào khách', 'Sân khấu', 'Trò chơi', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
 
 try {
   // ----- Máy tính ---------------------------------------------------------
@@ -267,6 +267,22 @@ try {
   await desk.click('text=Đặt lại');
   for (const name of ['Đồng hồ đếm giờ live', 'Top thả tim', 'Quà to nhất']) await desk.locator(`.card:has(h2:text-is("${name}")) .switch`).first().click();
   await sleep(500);
+  await desk.click('#clear-all');
+
+  // Sân khấu: tạo bài diễn, thêm một mốc pháo hoa ở giây 0, bấm Diễn thì mốc chạy.
+  await desk.click('#clear-all');
+  await desk.click('#nav >> text=Sân khấu');
+  await desk.click('text=Thêm bài diễn');
+  await desk.click('text=Thêm mốc');
+  await desk.locator('.cue select').first().selectOption('fireworks');
+  await sleep(700);
+  await desk.screenshot({ path: path.join(shots, '27-san-khau.png') });
+  await checkLayout(desk, 'Sân khấu');
+  await desk.click('.rule-actions >> text=Diễn');
+  await sleep(900);
+  note((await particles()) > 20, 'Sân khấu: bấm Diễn thì mốc đầu tiên chạy đúng lúc');
+  note((await desk.locator('.rule-text span').first().textContent()).includes('đang diễn'), 'Sân khấu: bảng điều khiển báo bài đang diễn');
+  await desk.click('.rule-actions >> text=Dừng');
   await desk.click('#clear-all');
 
   // Trò chơi: bật, khán giả gõ số để mở hộp, chủ phòng bấm mở cho tới khi trúng bẫy.

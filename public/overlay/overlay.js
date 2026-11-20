@@ -23,6 +23,8 @@ const extras = new Extras(document.body);
 const game = new GameView(document.body);
 const scenery = new Scenery(document.body);
 const bgm = new Bgm(document.body, preview);
+const showAudio = new Audio();
+showAudio.addEventListener('ended', () => { bgm.duck(false); if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'showEnded' })); });
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
 const nf = new Intl.NumberFormat('vi-VN');
 const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
@@ -302,6 +304,15 @@ function onMessage(msg) {
       break;
     case 'bgm': if (has('bgm')) bgm.cmd(msg); break;
     case 'auction': if (has('extras')) extras.onAuction(msg); break;
+    case 'show':
+      // Nhạc của bài diễn: phát từ đầu khi bắt đầu, dừng hẳn khi kết thúc. Nhạc nền nhường chỗ.
+      showAudio.pause();
+      if (msg.cmd === 'start' && msg.track && !preview) {
+        bgm.duck(true);
+        showAudio.src = `/media/${encodeURIComponent(msg.track)}`;
+        showAudio.play().catch(() => {});
+      } else bgm.duck(false);
+      break;
     case 'queueboard': extras.onQueue(msg); break;
     case 'timer': extras.onTimer(msg); break;
     case 'toplikes': extras.onLikes(msg); break;

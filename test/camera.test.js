@@ -560,3 +560,37 @@ test('dịch bình luận: gửi sang trang phụ đề, nhận bản dịch v�
     panel.ws.close(); cap.ws.close();
   } finally { await app.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test('sân khấu: mốc rơi đúng thứ tự và thời điểm, đổi góc máy theo mốc và theo nhịp', async () => {
+  const { Stage } = await import('../src/stage.js');
+  const { sanitizeConfig, defaultConfig } = await import('../src/defaults.js');
+  const cfg = sanitizeConfig({ ...defaultConfig(), stage: { cam1: 'Cận', cam2: 'Toàn', beatSwitch: 4, shows: [{ id: 'a', name: 'Bão', track: '../x.exe', cues: [
+    { t: 0.15, effect: 'fireworks', cam: 2 }, { t: 0.05, effect: 'hack', media: 'bao.webm', mediaKey: 'black', camera: 'zoomin' }, { t: 0.25, cam: 1, camera: 'bay' },
+  ] }] } });
+  assert.equal(cfg.stage.shows[0].track, ''); // tệp lạ bị loại
+  assert.deepEqual(cfg.stage.shows[0].cues.map((c) => [c.t, c.effect, c.media, c.camera, c.cam]), [[0.1, 'none', 'bao.webm', 'zoomin', 0], [0.2, 'fireworks', '', 'none', 2], [0.3, 'none', '', 'none', 1]]);
+  const out = []; const fired = []; const cams = [];
+  const st = new Stage({ getConfig: () => cfg, emit: (m) => out.push(m), fireCue: (c) => fired.push(c.t), switchCam: (i) => cams.push(i) });
+  try {
+    assert.equal(st.start('khong-co'), false);
+    assert.equal(st.start('a'), true);
+    assert.deepEqual(out[0], { type: 'show', cmd: 'start', track: '' });
+    assert.equal(st.state().running.name, 'Bão');
+    await wait(160);
+    assert.deepEqual(fired, [0.1]);
+    await wait(220);
+    assert.deepEqual([fired, cams], [[0.1, 0.2, 0.3], [2, 1]]);
+    st.stop();
+    assert.equal(st.state().running, null);
+    // Dừng giữa chừng thì các mốc còn lại không chạy nữa.
+    st.start('a'); st.stop();
+    await wait(350);
+    assert.equal(fired.length, 3);
+    // Theo nhịp: cứ 4 nhịp đổi góc máy một lần.
+    cams.length = 0;
+    for (let i = 0; i < 9; i++) st.onBeat();
+    assert.deepEqual(cams, [2, 1]);
+    cfg.stage.cam2 = '';
+    assert.equal(st.setCam(2), false); // chưa khai báo camera 2
+  } finally { st.close(); }
+});
