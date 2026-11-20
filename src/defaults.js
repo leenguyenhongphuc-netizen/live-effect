@@ -28,12 +28,13 @@ export const TRIGGERS = [
   { id: 'share', name: 'Có người chia sẻ' },
   { id: 'chat', name: 'Bình luận chứa từ khoá' },
   { id: 'join', name: 'Có người vào xem' },
+  { id: 'donate', name: 'Có người ủng hộ (chuyển khoản, nguồn khác)' },
   { id: 'button', name: 'Nút bấm tay (điện thoại, phím tắt)' },
 ];
 
 export const MEDIA_EXT = {
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp'],
-  video: ['webm', 'mp4'],
+  video: ['webm', 'mp4', 'mov'],
   audio: ['mp3', 'wav', 'ogg'],
 };
 
@@ -44,7 +45,7 @@ const rule = (id, name, trigger, action, extra = {}) => ({
   name,
   enabled: true,
   cooldown: 0,
-  trigger: { type: 'follow', user: '', giftName: '', minCoins: 0, every: 100, keyword: '', hotkey: '', ...trigger },
+  trigger: { type: 'follow', user: '', giftName: '', minCoins: 0, minAmount: 0, every: 100, keyword: '', hotkey: '', ...trigger },
   action: {
     effect: 'none',
     intensity: 2,
@@ -60,16 +61,27 @@ const rule = (id, name, trigger, action, extra = {}) => ({
   ...extra,
 });
 
+const donateRule = () => rule('r-donate', 'Cảm ơn ủng hộ', { type: 'donate' }, {
+  effect: 'coins', intensity: 3, duration: 7, text: '{user} ủng hộ {amount}  {text}', sound: 'fanfare',
+});
+
+export const CONFIG_VERSION = 2;
+
 export function defaultConfig() {
   return {
-    version: 1,
+    version: CONFIG_VERSION,
     tiktok: { username: '', signApiKey: '' },
+    twitch: { channel: '' },
+    donate: { enabled: false, sepayToken: '', bank: '', account: '', holder: '', memo: 'Ung ho' },
+    hook: { enabled: false, key: '' },
     widgets: {
       alerts: { enabled: true, position: 'top' },
       chat: { enabled: false, position: 'bottom-left', max: 6 },
       goal: { enabled: false, type: 'likes', target: 1000, title: 'Mục tiêu tim', position: 'top' },
+      top: { enabled: false, position: 'top-left', max: 3, title: 'Top tặng quà' },
+      qr: { enabled: false, position: 'bottom-right', title: 'Quét mã để ủng hộ' },
     },
-    tts: { enabled: false, chat: true, gift: true, follow: true, voice: '', rate: 1, maxLength: 80 },
+    tts: { enabled: false, chat: true, gift: true, follow: true, donate: true, voice: '', rate: 1, maxLength: 80 },
     remote: { enabled: false, token: '' },
     rules: [
       rule('r-follow', 'Cảm ơn follow', { type: 'follow' }, {
@@ -87,6 +99,7 @@ export function defaultConfig() {
       rule('r-like', 'Mỗi 100 tim', { type: 'like', every: 100 }, {
         effect: 'hearts', intensity: 1, duration: 3, alert: false,
       }),
+      donateRule(),
       rule('r-btn-party', 'Ăn mừng', { type: 'button' }, {
         effect: 'fireworks', intensity: 3, duration: 6, alert: false, sound: 'fanfare',
       }),
@@ -154,6 +167,7 @@ function sanitizeRule(input, index) {
       user: str(t.user, 60).trim().replace(/^@/, ''),
       giftName: str(t.giftName, 60).trim(),
       minCoins: Math.round(num(t.minCoins, 0, 1e6, 0)),
+      minAmount: Math.round(num(t.minAmount, 0, 1e9, 0)),
       every: Math.round(num(t.every, 1, 1e6, 100)),
       keyword: str(t.keyword, 60).trim(),
       hotkey: str(t.hotkey, 40).trim(),
@@ -182,9 +196,19 @@ export function sanitizeConfig(input) {
   const al = w.alerts || {};
   const ch = w.chat || {};
   const go = w.goal || {};
+  const tp = w.top || {};
+  const qr = w.qr || {};
+  const dn = c.donate && typeof c.donate === 'object' ? c.donate : {};
+  const hk = c.hook && typeof c.hook === 'object' ? c.hook : {};
+  const tw = c.twitch && typeof c.twitch === 'object' ? c.twitch : {};
 
   const seen = new Set();
-  const rules = (Array.isArray(c.rules) ? c.rules : d.rules).slice(0, 100).map((r, i) => {
+  const source = Array.isArray(c.rules) ? [...c.rules] : d.rules;
+  // Cấu hình từ bản 0.1 chưa có kịch bản ủng hộ: thêm sẵn một cái để bật donate là chạy.
+  if (Array.isArray(c.rules) && !(Number(c.version) >= CONFIG_VERSION) && !c.rules.some((r) => r?.trigger?.type === 'donate')) {
+    source.push(donateRule());
+  }
+  const rules = source.slice(0, 100).map((r, i) => {
     const clean = sanitizeRule(r, i);
     while (seen.has(clean.id)) clean.id = `${clean.id}x`;
     seen.add(clean.id);
@@ -192,12 +216,36 @@ export function sanitizeConfig(input) {
   });
 
   return {
-    version: 1,
+    version: CONFIG_VERSION,
     tiktok: {
       username: str(tk.username, 60).trim().replace(/^@/, ''),
       signApiKey: str(tk.signApiKey, 200).trim(),
     },
+    twitch: { channel: str(tw.channel, 40).trim().toLowerCase().replace(/[^a-z0-9_]/g, '') },
+    donate: {
+      enabled: bool(dn.enabled, false),
+      sepayToken: str(dn.sepayToken, 200).trim(),
+      bank: /^\d{6}$/.test(dn.bank) ? dn.bank : '',
+      account: str(dn.account, 30).replace(/[^A-Za-z0-9]/g, ''),
+      holder: str(dn.holder, 60).trim(),
+      memo: str(dn.memo, 50),
+    },
+    hook: {
+      enabled: bool(hk.enabled, false),
+      key: /^[0-9a-f]{32}$/.test(hk.key) ? hk.key : '',
+    },
     widgets: {
+      top: {
+        enabled: bool(tp.enabled, d.widgets.top.enabled),
+        position: oneOf(tp.position, ['top-left', 'top-right', 'bottom-left', 'bottom-right'], 'top-left'),
+        max: Math.round(num(tp.max, 1, 10, 3)),
+        title: str(tp.title, 40) || d.widgets.top.title,
+      },
+      qr: {
+        enabled: bool(qr.enabled, d.widgets.qr.enabled),
+        position: oneOf(qr.position, ['top-left', 'top-right', 'bottom-left', 'bottom-right'], 'bottom-right'),
+        title: str(qr.title, 40),
+      },
       alerts: {
         enabled: bool(al.enabled, d.widgets.alerts.enabled),
         position: oneOf(al.position, ['top', 'center', 'bottom'], 'top'),
@@ -209,7 +257,7 @@ export function sanitizeConfig(input) {
       },
       goal: {
         enabled: bool(go.enabled, d.widgets.goal.enabled),
-        type: oneOf(go.type, ['likes', 'coins', 'follows'], 'likes'),
+        type: oneOf(go.type, ['likes', 'coins', 'follows', 'donate'], 'likes'),
         target: Math.round(num(go.target, 1, 1e9, 1000)),
         title: str(go.title, 40) || d.widgets.goal.title,
         position: oneOf(go.position, ['top', 'bottom'], 'top'),
@@ -220,6 +268,7 @@ export function sanitizeConfig(input) {
       chat: bool(tts.chat, true),
       gift: bool(tts.gift, true),
       follow: bool(tts.follow, true),
+      donate: bool(tts.donate, true),
       voice: str(tts.voice, 120),
       rate: num(tts.rate, 0.5, 2, 1),
       maxLength: Math.round(num(tts.maxLength, 10, 300, 80)),

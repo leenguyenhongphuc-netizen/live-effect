@@ -111,4 +111,28 @@ html, body {
 #goal-fill { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width 500ms ease-out; }
 #goal.done #goal-fill { background: var(--gold); }
 
+/* Bảng top tặng quà và mã QR ủng hộ: bốn góc, chừa chỗ cho thanh mục tiêu và nút của TikTok */
+#top, #qr { position: fixed; pointer-events: none; background: rgba(20, 18, 26, 0.86); border-radius: calc(var(--u) * 1.8); }
+#top[data-pos^="top"], #qr[data-pos^="top"] { top: 21vh; } /* dưới dòng thông báo (14vh) */
+#top[data-pos^="bottom"], #qr[data-pos^="bottom"] { bottom: 16vh; }
+#top[data-pos$="left"], #qr[data-pos$="left"] { left: calc(var(--u) * 2.4); }
+#top[data-pos$="right"], #qr[data-pos$="right"] { right: calc(var(--u) * 2.4); }
+
+#top { width: calc(var(--u) * 27); padding: calc(var(--u) * 1) calc(var(--u) * 1.3); font-size: calc(var(--u) * 1.7); }
+#top-title { font-weight: 700; color: var(--gold); margin-bottom: calc(var(--u) * 0.6); }
+#top-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(var(--u) * 0.5); }
+#top-rows li { display: flex; align-items: center; gap: calc(var(--u) * 0.7); font-weight: 600; }
+#top-rows .rank { flex: none; width: 1.2em; color: var(--gold); font-variant-numeric: tabular-nums; }
+#top-rows img { flex: none; width: calc(var(--u) * 2.6); height: calc(var(--u) * 2.6); border-radius: 50%; object-fit: cover; background: #2a2732; }
+#top-rows .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#top-rows .num { flex: none; font-variant-numeric: tabular-nums; color: var(--gold); }
+#top-rows .empty { color: #b9b4c0; font-weight: 400; }
+
+#qr { width: calc(var(--u) * 19); padding: calc(var(--u) * 1); text-align: center; font-size: calc(var(--u) * 1.5); font-weight: 700; line-height: 1.25; }
+#qr-title { margin-bottom: calc(var(--u) * 0.7); text-wrap: balance; }
+#qr-code { background: #fff; border-radius: calc(var(--u) * 0.9); padding: calc(var(--u) * 0.5); line-height: 0; }
+#qr-code svg { width: 100%; height: auto; display: block; }
+#qr-line { margin-top: calc(var(--u) * 0.6); font-weight: 600; color: #d9d5de; overflow-wrap: anywhere; white-space: pre-line; }
+#qr-line:empty { display: none; }
+
 [hidden] { display: none !important; }

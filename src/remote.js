@@ -7,11 +7,12 @@ import { sendJson, readJson, serveFile } from './http.js';
 // Máy chủ điều khiển từ điện thoại. Khác máy chủ chính (chỉ nghe trên máy này),
 // máy chủ này nghe trên mạng Wi-Fi nội bộ, nên:
 //   - chỉ bật khi người dùng tự bật trong bảng điều khiển,
-//   - chỉ phục vụ trang điều khiển và hai lệnh /r/state, /r/fire,
+//   - chỉ phục vụ trang điều khiển và các lệnh /r/... (xem trạng thái, bấm nút, thêm video thành nút),
 //   - mọi lệnh đều phải kèm mã ghép nối ngẫu nhiên 128 bit (nằm trong mã QR).
 
 const HTML_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
+  // blob: để hiện ảnh thu nhỏ của nút và lấy khung hình từ video vừa chọn trên điện thoại.
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
   'Referrer-Policy': 'no-referrer',
 };
 
@@ -34,7 +35,7 @@ function sameKey(given, expected) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-export function createRemote({ publicDir, getConfig, basePort, getState, fire, onChange }) {
+export function createRemote({ publicDir, getConfig, basePort, getState, fire, extra, onChange }) {
   let server = null;
   let port = 0;
   let error = '';
@@ -59,7 +60,11 @@ export function createRemote({ publicDir, getConfig, basePort, getState, fire, o
           .then((body) => sendJson(res, 200, { ok: fire(body) }))
           .catch((err) => sendJson(res, err.status || 400, { error: err.message }));
       }
-      return sendJson(res, 404, { error: 'not found' });
+      if (!extra) return sendJson(res, 404, { error: 'not found' });
+      return Promise.resolve()
+        .then(() => extra(req, res, url))
+        .then((handled) => { if (!handled) sendJson(res, 404, { error: 'not found' }); })
+        .catch((err) => { if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message || 'Lỗi máy chủ' }); });
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });

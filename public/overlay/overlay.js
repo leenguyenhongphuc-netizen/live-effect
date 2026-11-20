@@ -7,12 +7,12 @@ import { keyedCanvas } from '/overlay/key.js';
 //   ?layers=fx,alerts...  chỉ hiện một số lớp, dùng khi muốn tách thành nhiều nguồn trong OBS
 const params = new URLSearchParams(location.search);
 const preview = params.get('preview') === '1';
-const layers = new Set((params.get('layers') || 'fx,alerts,media,chat,goal').split(','));
+const layers = new Set((params.get('layers') || 'fx,alerts,media,chat,goal,top,qr').split(','));
 const has = (name) => layers.has(name);
 
 const $ = (id) => document.getElementById(id);
 const fx = new Fx($('fx'));
-const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border') };
+const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
 const nf = new Intl.NumberFormat('vi-VN');
 const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
 
@@ -20,6 +20,8 @@ let widgets = {
   alerts: { enabled: true, position: 'top' },
   chat: { enabled: false, position: 'bottom-left', max: 6 },
   goal: { enabled: false, position: 'top' },
+  top: { enabled: false, position: 'top-left', max: 3, title: '' },
+  qr: { enabled: false, position: 'bottom-right', title: '', svg: '', bank: '', holder: '' },
 };
 
 // --- Thông báo: hiện lần lượt từng cái -------------------------------------
@@ -145,8 +147,55 @@ function setGoal({ value = 0, target = 1, title = '' }) {
   els.goal.classList.toggle('done', value >= target);
 }
 
+// --- Bảng top tặng quà ------------------------------------------------------
+function setTop(rows) {
+  const list = rows.map((r, i) => {
+    const li = document.createElement('li');
+    const rank = document.createElement('span');
+    rank.className = 'rank';
+    rank.textContent = String(i + 1);
+    li.append(rank);
+    const avatar = httpUrl(r.avatar);
+    if (avatar) {
+      const im = document.createElement('img');
+      im.alt = '';
+      im.referrerPolicy = 'no-referrer';
+      im.src = avatar;
+      im.onerror = () => im.remove();
+      li.append(im);
+    }
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = r.name || 'Ẩn danh';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = nf.format(r.coins || 0);
+    li.append(who, num);
+    return li;
+  });
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Chưa có ai, bạn mở màn nhé!';
+    list.push(li);
+  }
+  $('top-rows').replaceChildren(...list);
+}
+
 function applyWidgets(next) {
   widgets = { ...widgets, ...next };
+  els.top.dataset.pos = widgets.top.position;
+  els.top.hidden = !(has('top') && widgets.top.enabled);
+  $('top-title').textContent = widgets.top.title;
+  els.qr.dataset.pos = widgets.qr.position;
+  els.qr.hidden = !(has('qr') && widgets.qr.enabled && widgets.qr.svg);
+  $('qr-title').textContent = widgets.qr.title;
+  // Mã QR là SVG do chính ứng dụng tạo từ số tài khoản; không có nội dung từ người xem.
+  if ($('qr-code').dataset.svg !== widgets.qr.svg) {
+    $('qr-code').innerHTML = widgets.qr.svg || '';
+    $('qr-code').dataset.svg = widgets.qr.svg || '';
+  }
+  $('qr-line').textContent = [widgets.qr.holder, widgets.qr.bank].filter(Boolean).join('\n');
   els.alerts.dataset.pos = widgets.alerts.position;
   els.chat.dataset.pos = widgets.chat.position;
   els.chat.hidden = !(has('chat') && widgets.chat.enabled);
@@ -183,6 +232,7 @@ function onMessage(msg) {
     case 'widgets': applyWidgets(msg.widgets); break;
     case 'chat': addChat(msg); break;
     case 'goal': setGoal(msg); break;
+    case 'top': setTop(Array.isArray(msg.rows) ? msg.rows : []); break;
     case 'clear': clearAll(); break;
     default: break;
   }
