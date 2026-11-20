@@ -158,6 +158,8 @@ button, input, select { font: inherit; color: inherit; }
 .note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-small); color: var(--muted); }
 .note.err { color: var(--accent); }
 .note.ok { color: var(--ok); }
+.note.wait { color: var(--warn); }
+.mono { font-family: Consolas, ui-monospace, monospace; overflow-wrap: anywhere; user-select: text; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
 details.adv > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-small); min-height: 32px; display: inline-flex; align-items: center; }

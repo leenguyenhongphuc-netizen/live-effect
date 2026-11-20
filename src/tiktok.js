@@ -37,36 +37,65 @@ export function normalizeGift(data = {}) {
   };
 }
 
-export function friendlyError(err) {
+const NETWORK = /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|socket|fetch failed|timeout/i;
+
+/**
+ * Phân loại lỗi kết nối: `kind` để quyết định làm gì tiếp, `message` để hiện cho người
+ * dùng, `detail` là nguyên văn lỗi kỹ thuật (để gửi khi cần hỗ trợ).
+ */
+export function classify(err, username = '') {
   const name = err?.name || err?.constructor?.name || '';
   const msg = String(err?.message || err || '');
-  if (/offline|not.*live|isn't online|LIVE has ended/i.test(name + msg)) {
-    return 'Kênh này chưa bật LIVE. Hãy bắt đầu phiên live trước rồi bấm Kết nối lại.';
-  }
-  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network|socket|fetch failed/i.test(name + msg)) {
-    return 'Không có mạng hoặc TikTok không phản hồi. Kiểm tra kết nối Internet rồi thử lại.';
-  }
-  // Thư viện báo cùng một lỗi cho "sai ID" và "không vào được TikTok", nên nói rõ cả hai khả năng.
-  if (/Failed to retrieve room/i.test(name + msg)) {
-    return 'Không lấy được phòng live của kênh này. Kiểm tra lại ID TikTok (phần sau dấu @) và kết nối Internet.';
-  }
-  if (/\bnot found\b|user.*exist/i.test(name + msg)) {
-    return 'Không tìm thấy kênh này. Kiểm tra lại ID TikTok (phần sau dấu @).';
+  // Lỗi tổng hợp của thư viện gói lỗi của từng nguồn (trang kênh, API, Euler) ở đây.
+  const subs = (err?.config?.requestErrs || []).map((e) => String(e?.message || e));
+  const detail = [name && name !== 'Error' ? name : '', msg, ...subs].filter(Boolean).join(' | ').slice(0, 700);
+  const who = username ? `@${username}` : 'này';
+  const offline = {
+    kind: 'offline',
+    detail,
+    message: `Kênh ${who} chưa lên sóng. Cứ để vậy: khi bạn bấm Phát LIVE, ứng dụng sẽ tự kết nối. Nếu đang live rồi mà vẫn thấy dòng này, hãy kiểm tra lại ID TikTok.`,
+  };
+
+  if (/UserOffline|offline|not.*live|isn't online|LIVE has ended/i.test(name + msg)) return offline;
+  if (/Failed to retrieve room/i.test(msg)) {
+    // TikTok có trả lời nhưng trang kênh không có phòng live: kênh chưa lên sóng (hoặc sai ID).
+    if (subs.some((x) => /Failed to extract Room ID from (HTML|API)/i.test(x))) return offline;
+    if (subs.length && subs.every((x) => NETWORK.test(x))) {
+      return { kind: 'network', detail, message: 'Không có mạng hoặc TikTok không phản hồi. Kiểm tra kết nối Internet rồi thử lại.' };
+    }
+    return { kind: 'room', detail, message: 'Không lấy được phòng live của kênh này. Kiểm tra lại ID TikTok (phần sau dấu @) và kết nối Internet.' };
   }
   if (/rate.?limit|429|too many/i.test(name + msg)) {
-    return 'Máy chủ ký kết nối đang giới hạn lượt dùng miễn phí. Chờ vài phút rồi thử lại, hoặc nhập khoá Euler Stream ở mục Nâng cao.';
+    return { kind: 'ratelimit', detail, message: 'Máy chủ ký kết nối đang giới hạn lượt dùng miễn phí. Chờ vài phút rồi thử lại, hoặc nhập khoá Euler Stream ở mục Nâng cao.' };
   }
-  return `Không kết nối được: ${msg.slice(0, 160) || name || 'lỗi không rõ'}`;
+  if (NETWORK.test(name + msg)) {
+    return { kind: 'network', detail, message: 'Không có mạng hoặc TikTok không phản hồi. Kiểm tra kết nối Internet rồi thử lại.' };
+  }
+  if (/\bnot found\b|user.*exist/i.test(name + msg)) {
+    return { kind: 'notfound', detail, message: 'Không tìm thấy kênh này. Kiểm tra lại ID TikTok (phần sau dấu @).' };
+  }
+  return { kind: 'other', detail, message: `Không kết nối được: ${msg.slice(0, 160) || name || 'lỗi không rõ'}` };
 }
 
+export const friendlyError = (err) => classify(err).message;
+
 const RETRY_DELAYS = [3000, 8000, 15000, 30000, 60000];
+const POLL_MS = 20000; // nhịp hỏi "kênh đã lên sóng chưa" khi đang chờ
 
 export class TikTokSource extends EventEmitter {
-  constructor() {
+  /**
+   * @param {object} [opts]
+   * @param {() => Promise<object>} [opts.loadLib] thay thư viện kết nối khi kiểm thử
+   * @param {number} [opts.pollMs] nhịp hỏi trạng thái live khi đang chờ
+   */
+  constructor({ loadLib = () => import('tiktok-live-connector'), pollMs = POLL_MS } = {}) {
     super();
+    this.loadLib = loadLib;
+    this.pollMs = pollMs;
+    this.waitTicks = 0;
     this.conn = null;
     this.username = '';
-    this.status = { state: 'idle', username: '', error: '', viewers: 0 };
+    this.status = { state: 'idle', username: '', error: '', detail: '', viewers: 0 };
     this.wanted = false; // người dùng đang muốn giữ kết nối
     this.retry = 0;
     this.retryTimer = null;
@@ -82,21 +111,23 @@ export class TikTokSource extends EventEmitter {
     await this.disconnect();
     this.username = String(username || '').trim().replace(/^@/, '');
     if (!this.username) {
-      this.#setStatus({ state: 'error', error: 'Hãy nhập ID TikTok của kênh.' });
+      this.#setStatus({ state: 'error', error: 'Hãy nhập ID TikTok của kênh.', detail: '' });
       return;
     }
     this.signApiKey = signApiKey || '';
     this.wanted = true;
     this.retry = 0;
+    this.waitTicks = 0;
     await this.#open();
   }
 
-  async #open() {
+  /** @param {boolean} [quiet] đang chờ kênh lên sóng: thử kết nối mà không đổi dòng trạng thái */
+  async #open(quiet = false) {
     const gen = ++this.generation;
-    this.#setStatus({ state: 'connecting', username: this.username, error: '' });
+    if (!quiet) this.#setStatus({ state: 'connecting', username: this.username, error: '', detail: '' });
     let lib;
     try {
-      lib = await import('tiktok-live-connector');
+      lib = await this.loadLib();
     } catch (err) {
       this.wanted = false;
       this.#setStatus({ state: 'error', error: `Thiếu thư viện kết nối TikTok: ${err.message}` });
@@ -135,7 +166,7 @@ export class TikTokSource extends EventEmitter {
     conn.on(WebcastEvent.STREAM_END, () => {
       if (!live()) return;
       this.wanted = false;
-      this.#setStatus({ state: 'idle', error: 'Phiên live đã kết thúc.', viewers: 0 });
+      this.#setStatus({ state: 'idle', error: 'Phiên live đã kết thúc.', detail: '', viewers: 0 });
     });
     conn.on(ControlEvent.ERROR, () => { /* lỗi lẻ khi giải mã tin nhắn: bỏ qua, kết nối vẫn sống */ });
     conn.on(ControlEvent.DISCONNECTED, () => {
@@ -147,29 +178,50 @@ export class TikTokSource extends EventEmitter {
       await conn.connect();
       if (!live()) return;
       this.retry = 0;
-      this.#setStatus({ state: 'connected', error: '' });
+      this.#setStatus({ state: 'connected', username: this.username, error: '', detail: '' });
     } catch (err) {
       if (!live()) return;
-      const message = friendlyError(err);
-      // Kênh chưa live hoặc sai ID thì thử lại cũng vô ích: dừng và báo rõ.
-      const permanent = /chưa bật LIVE|Không tìm thấy kênh|Không lấy được phòng live/.test(message);
-      if (permanent || this.retry >= RETRY_DELAYS.length) {
+      const fail = classify(err, this.username);
+      if (fail.kind === 'offline') {
+        // Kênh chưa lên sóng: không bắt người dùng bấm lại, tự chờ rồi tự kết nối.
+        this.#setStatus({ state: 'waiting', username: this.username, error: fail.message, detail: fail.detail, viewers: 0 });
+        this.#pollUntilLive();
+      } else if (fail.kind === 'room' || fail.kind === 'notfound' || this.retry >= RETRY_DELAYS.length) {
+        // Sai ID thì thử lại cũng vô ích: dừng và báo rõ.
         this.wanted = false;
-        this.#setStatus({ state: 'error', error: message });
+        this.#setStatus({ state: 'error', error: fail.message, detail: fail.detail });
       } else {
-        this.#scheduleRetry(message);
+        this.#scheduleRetry(fail.message, fail.detail);
       }
     }
   }
 
-  #scheduleRetry(message) {
+  #pollUntilLive() {
+    clearTimeout(this.retryTimer);
+    const gen = this.generation;
+    const conn = this.conn;
+    this.retryTimer = setTimeout(async () => {
+      if (gen !== this.generation || !this.wanted) return;
+      this.waitTicks += 1;
+      let isLive = null;
+      try { isLive = await conn.fetchIsLive(); } catch { /* không hỏi được: xử lý bên dưới */ }
+      if (gen !== this.generation || !this.wanted) return;
+      // TikTok trả lời rõ "chưa live" thì chờ tiếp. Khi không hỏi được (ví dụ TikTok chặn
+      // trang kênh), cứ ba nhịp lại thử kết nối thật một lần để không bỏ lỡ lúc lên sóng.
+      if (isLive === true) this.#open();
+      else if (isLive === null && this.waitTicks % 3 === 0) this.#open(true);
+      else this.#pollUntilLive();
+    }, this.pollMs);
+  }
+
+  #scheduleRetry(message, detail = '') {
     if (this.retry >= RETRY_DELAYS.length) {
       this.wanted = false;
       this.#setStatus({ state: 'error', error: 'Đã thử nối lại nhiều lần không được. Bấm Kết nối để thử lại.' });
       return;
     }
     const delay = RETRY_DELAYS[this.retry++];
-    this.#setStatus({ state: 'connecting', error: `${message} (thử lại sau ${Math.round(delay / 1000)} giây)` });
+    this.#setStatus({ state: 'connecting', error: `${message} (thử lại sau ${Math.round(delay / 1000)} giây)`, detail });
     clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => { if (this.wanted) this.#open(); }, delay);
   }
@@ -183,6 +235,6 @@ export class TikTokSource extends EventEmitter {
     if (conn) {
       try { await conn.disconnect(); } catch { /* đã đóng */ }
     }
-    this.#setStatus({ state: 'idle', error: '', viewers: 0 });
+    this.#setStatus({ state: 'idle', error: '', detail: '', viewers: 0 });
   }
 }

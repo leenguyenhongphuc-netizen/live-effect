@@ -22,7 +22,8 @@ Trong đó có bản cài đặt và bản chạy thẳng (`LiveEffect-portable-
 1. **Dán link overlay** (mặc định `http://127.0.0.1:3939/overlay`) vào phần mềm live:
    - OBS: *Sources → + → Browser*, kích thước 1080×1920 (dọc) hoặc 1920×1080 (ngang), kéo lên trên cùng.
    - TikTok LIVE Studio: *Thêm nguồn → Liên kết*, kéo cho phủ kín khung hình.
-2. **Nhập ID TikTok** của kênh đang live rồi bấm *Kết nối*. Không cần mật khẩu.
+2. **Nhập ID TikTok** của kênh rồi bấm *Kết nối*. Không cần mật khẩu. Nếu kênh chưa lên sóng, ứng dụng tự chờ
+   và tự kết nối khi bạn bấm *Phát LIVE*.
 3. **Bấm thử** các nút giả lập. Hiệu ứng hiện ở khung xem thử và trong phần mềm live.
 
 ### Điều khiển bằng điện thoại

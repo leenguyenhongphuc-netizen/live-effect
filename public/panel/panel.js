@@ -140,7 +140,8 @@ function viewHome() {
   const tk = st.tiktok;
   const linked = st.overlays > 0;
   const connected = tk.state === 'connected';
-  const busy = tk.state === 'connecting';
+  const waiting = tk.state === 'waiting';
+  const busy = tk.state === 'connecting' || waiting;
 
   const url = h('input.input', { type: 'text', readOnly: true, value: S.overlayUrl, 'aria-label': 'Link overlay', onfocus: (e) => e.target.select() });
   const copy = h('button.btn.primary', { type: 'button', onclick: async () => {
@@ -166,26 +167,31 @@ function viewHome() {
     type: 'text', value: S.config.tiktok.username, placeholder: 'ten_kenh', autocomplete: 'off', spellcheck: false,
     'aria-label': 'ID TikTok', disabled: connected || busy,
     oninput: (e) => { S.config.tiktok.username = e.target.value.trim().replace(/^@/, ''); save(); },
-    onkeydown: (e) => { if (e.key === 'Enter') connect(); },
+    // Bỏ con trỏ khỏi ô nhập để dòng trạng thái bên dưới được cập nhật ngay.
+    onkeydown: (e) => { if (e.key === 'Enter') { e.target.blur(); connect(); } },
   });
   const connect = () => {
     if (!S.config.tiktok.username) { toast('Hãy nhập ID TikTok của kênh'); userInput.focus(); return; }
     act('/api/connect', { username: S.config.tiktok.username });
   };
   const connectBtn = connected || busy
-    ? h('button.btn', { type: 'button', onclick: () => act('/api/disconnect') }, 'Ngắt kết nối')
+    ? h('button.btn', { type: 'button', onclick: () => act('/api/disconnect') }, waiting ? 'Dừng chờ' : 'Ngắt kết nối')
     : h('button.btn.primary', { type: 'button', onclick: connect }, 'Kết nối');
   const tkNote = connected ? ['ok', `Đã kết nối @${tk.username}. Quà, follow, tim sẽ tự kích hiệu ứng.`]
-    : busy ? ['', tk.error || 'Đang kết nối…']
-      : tk.error ? ['err', tk.error]
-        : ['', 'Kênh phải đang live. Không cần mật khẩu hay đăng nhập TikTok.'];
+    : waiting ? ['wait', tk.error]
+      : busy ? ['', tk.error || 'Đang kết nối…']
+        : tk.error ? ['err', tk.error]
+          : ['', 'Bấm Kết nối trước hay sau khi lên sóng đều được: ứng dụng tự chờ kênh bắt đầu live. Không cần mật khẩu TikTok.'];
 
   const step2 = h('section.card.step', null,
     h(`div.step-num${connected ? '.done' : ''}`, { 'aria-hidden': 'true' }, '2'),
-    h('h2', null, 'Kết nối kênh TikTok đang live'),
+    h('h2', null, 'Kết nối kênh TikTok'),
     h('div.step-body', null,
       h('div.row', null, h('div.field.prefix', null, h('i', null, '@'), userInput), connectBtn),
       h(`p.note${tkNote[0] ? `.${tkNote[0]}` : ''}`, { role: 'status' }, tkNote[1]),
+      tk.detail && !connected ? h('details.adv', null,
+        h('summary', null, 'Chi tiết kỹ thuật (gửi kèm khi cần hỗ trợ)'),
+        h('p.small.muted.mono', null, tk.detail)) : null,
       h('p.small.muted', null, 'Stream game trên YouTube, Facebook hay Twitch? Bỏ qua bước này, dùng nút bấm trên điện thoại hoặc phím tắt để bật hiệu ứng.'),
       h('details.adv', null,
         h('summary', null, 'Nâng cao: khoá Euler Stream'),
@@ -520,9 +526,10 @@ function renderNav() {
 
 function renderStatus() {
   const { tiktok: tk, overlays } = S.status;
-  const dot = { connected: 'ok', connecting: 'wait', error: 'err' }[tk.state] || '';
+  const dot = { connected: 'ok', connecting: 'wait', waiting: 'wait', error: 'err' }[tk.state] || '';
   const line = tk.state === 'connected' ? [h('b', null, `@${tk.username}`), tk.viewers ? ` · ${tk.viewers} người xem` : ' · đang live']
     : tk.state === 'connecting' ? ['Đang kết nối TikTok…']
+      : tk.state === 'waiting' ? ['Đang chờ ', h('b', null, `@${tk.username}`), ' lên sóng…']
       : tk.state === 'error' ? ['TikTok: lỗi kết nối'] : ['TikTok: chưa kết nối'];
   document.getElementById('side-status').replaceChildren(
     h('div.stat', null, h(`span.dot${dot ? `.${dot}` : ''}`), h('span', null, line)),

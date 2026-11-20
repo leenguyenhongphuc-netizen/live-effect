@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Engine } from '../src/engine.js';
 import { defaultConfig, sanitizeConfig, safeMediaName } from '../src/defaults.js';
-import { normalizeGift, normalizeUser, friendlyError } from '../src/tiktok.js';
+import { normalizeGift, normalizeUser, friendlyError, classify, TikTokSource } from '../src/tiktok.js';
 
 function setup(mutate) {
   const config = defaultConfig();
@@ -132,9 +132,56 @@ test('quà theo chuỗi chỉ tính khi chuỗi kết thúc', () => {
 });
 
 test('lỗi kết nối được dịch sang câu dễ hiểu', () => {
-  assert.match(friendlyError(Object.assign(new Error('x'), { name: 'UserOfflineError' })), /chưa bật LIVE/);
+  assert.match(friendlyError(Object.assign(new Error('x'), { name: 'UserOfflineError' })), /chưa lên sóng/);
   assert.match(friendlyError(new Error('Rate limited, 429')), /giới hạn/);
   assert.match(friendlyError(new Error('getaddrinfo ENOTFOUND www.tiktok.com')), /mạng/);
   assert.match(friendlyError(new Error('Failed to retrieve Room ID from all sources.')), /ID TikTok.*Internet/);
   assert.match(friendlyError(Object.assign(new Error('x'), { name: 'SignatureRateLimitError' })), /giới hạn/);
+});
+
+// Lỗi tổng hợp đúng dạng thư viện ném ra khi không tìm được phòng live.
+const roomError = (...subs) => Object.assign(new Error('Failed to retrieve Room ID from all sources.'), {
+  config: { requestErrs: subs.map((m) => new Error(m)) },
+});
+const OFFLINE = roomError('[fetchRoomIdRoute] Failed to extract Room ID from HTML.', '[fetchRoomIdRoute] Failed to extract Room ID from API.', 'Euler: lack of permission');
+
+test('kênh chưa lên sóng được nhận ra từ lỗi con, khác với mất mạng', () => {
+  const off = classify(OFFLINE, 'kenh');
+  assert.equal(off.kind, 'offline');
+  assert.match(off.message, /@kenh chưa lên sóng.*tự kết nối/);
+  assert.match(off.detail, /Failed to extract Room ID from HTML/);
+  assert.equal(classify(roomError('getaddrinfo ENOTFOUND www.tiktok.com', 'connect ETIMEDOUT 1.2.3.4:443')).kind, 'network');
+  assert.equal(classify(roomError('HTTP 403 captcha')).kind, 'room');
+  assert.equal(classify(Object.assign(new Error('x'), { name: 'UserOfflineError' })).kind, 'offline');
+});
+
+test('bấm kết nối trước khi lên sóng: ứng dụng chờ rồi tự kết nối', async () => {
+  let liveAfter = 2; // lần hỏi thứ 2 thì kênh đã lên sóng
+  let asked = 0;
+  class FakeConn {
+    on() {}
+    async fetchIsLive() { asked += 1; return asked >= liveAfter; }
+    async connect() { if (asked < liveAfter) throw OFFLINE; }
+    async disconnect() {}
+  }
+  const loadLib = async () => ({ TikTokLiveConnection: FakeConn, WebcastEvent: {}, ControlEvent: {} });
+  const src = new TikTokSource({ loadLib, pollMs: 5 });
+  const states = [];
+  src.on('status', (s) => { if (states.at(-1) !== s.state) states.push(s.state); });
+  await src.connect('kenh');
+  assert.equal(src.status.state, 'waiting');
+  assert.match(src.status.error, /chưa lên sóng/);
+  for (let i = 0; i < 100 && src.status.state !== 'connected'; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(src.status.state, 'connected');
+  assert.deepEqual(states, ['idle', 'connecting', 'waiting', 'connecting', 'connected']);
+  assert.equal(src.status.detail, '');
+
+  // Dừng chờ thì không tự kết nối nữa.
+  liveAfter = 1e9; asked = 0;
+  await src.connect('kenh');
+  assert.equal(src.status.state, 'waiting');
+  await src.disconnect();
+  liveAfter = 0;
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(src.status.state, 'idle');
 });
