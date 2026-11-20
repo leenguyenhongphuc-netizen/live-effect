@@ -8,6 +8,7 @@ import { Store } from './store.js';
 import { sendJson, readBody, readJson, saveBody, serveFile } from './http.js';
 import { createRemote } from './remote.js';
 import { GiftCatalog } from './gifts.js';
+import { ObsCamera } from './obscam.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -62,11 +63,12 @@ function sameKey(given, expected) {
  * Khởi động lõi ứng dụng: máy chủ HTTP + WebSocket chỉ nghe trên máy này.
  * @returns {Promise<object>} điều khiển ứng dụng (url, fireRule, close...)
  */
-export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source, twitch: twitchInjected, sepay: sepayInjected, obs = addToObs } = {}) {
+export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source, twitch: twitchInjected, sepay: sepayInjected, obs = addToObs, obsPort } = {}) {
   const store = new Store(dataDir);
   const tiktok = source || new TikTokSource();
   const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
   tiktok.catalog = catalog;
+  const camera = new ObsCamera({ getConfig: () => store.config, port: obsPort, onStatus: () => broadcast('panel', statusMsg()) });
   const twitch = twitchInjected || new TwitchSource();
   const sepay = sepayInjected || new SepaySource();
   const clients = new Set(); // { ws, role }
@@ -83,6 +85,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const overlayCount = () => [...clients].filter((c) => c.role === 'overlay' && !c.preview).length;
   const statusMsg = () => ({
     type: 'status', tiktok: tiktok.status, twitch: twitch.status, donate: sepay.status, overlays: overlayCount(), hotkeyErrors,
+    camera: camera.status,
   });
   const widgetsMsg = () => {
     const w = store.config.widgets;
@@ -90,6 +93,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     return {
       type: 'widgets',
       music: store.config.music,
+      captions: store.config.captions,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
   };
@@ -115,13 +119,18 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const unit = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0; };
   const relayAudio = (msg) => {
     if (!store.config.music.enabled) return;
+    if (msg.beat === true) camera.beat(unit(msg.s));
     broadcast('overlay', {
       type: 'audio', b: unit(msg.b), m: unit(msg.m), h: unit(msg.h), l: unit(msg.l), beat: msg.beat === true, s: unit(msg.s),
       bands: Array.isArray(msg.bands) ? msg.bands.slice(0, 12).map((x) => Math.round(unit(Number(x) / 100) * 100)) : [],
     });
   };
 
-  const engine = new Engine(() => store.config, (msg) => broadcast('overlay', msg));
+  // Kịch bản có kèm chuyển động camera: gửi lệnh sang OBS cùng lúc với hiệu ứng trên overlay.
+  const engine = new Engine(() => store.config, (msg) => {
+    if (msg.type === 'fx' && msg.camera && msg.camera !== 'none') camera.move(msg.camera, { duration: msg.duration });
+    broadcast('overlay', msg);
+  });
 
   const record = (ev, fired) => {
     const entry = { ...ev, at: Date.now(), fired };
@@ -306,6 +315,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       await refreshQr();
       syncSepay();
       pushConfig();
+      await camera.sync();
       await remote.sync();
       return sendJson(res, 200, { config: store.config, remote: await remote.info(), hookUrl: hookUrl() });
     }
@@ -351,6 +361,20 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       return sendJson(res, 200, { ok: true });
     }
 
+    if (route === 'POST /api/caption') {
+      // Câu nói và bản dịch từ trang phụ đề (mở trong Chrome): làm sạch rồi đưa lên overlay.
+      const body = await readJson(req);
+      const text = typeof body.text === 'string' ? body.text.trim().slice(0, 300) : '';
+      const on = store.config.captions.enabled;
+      if (on && text) {
+        const lines = (Array.isArray(body.lines) ? body.lines : []).slice(0, 2)
+          .map((l) => ({ lang: String(l?.lang || '').replace(/[^a-z-]/gi, '').slice(0, 8), text: typeof l?.text === 'string' ? l.text.trim().slice(0, 300) : '' }))
+          .filter((l) => l.text);
+        broadcast('overlay', { type: 'caption', text, lines, final: body.final === true });
+      }
+      return sendJson(res, 200, { ok: true, enabled: on, overlays: overlayCount() });
+    }
+
     if (route === 'POST /api/obs/add') {
       return sendJson(res, 200, await obs(`http://127.0.0.1:${boundPort}/overlay`));
     }
@@ -391,6 +415,12 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       const ev = sample.type === 'follow' ? { ...sample, user: `${sample.user}_${Date.now() % 100000}` } : { ...sample };
       ingest({ ...ev, simulated: true });
       return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/camera/test') {
+      const body = await readJson(req);
+      const ok = camera.move(String(body.move || ''), { duration: 2.5 });
+      return sendJson(res, 200, { ok, camera: camera.status });
     }
 
     if (route === 'POST /api/clear') {
@@ -484,8 +514,9 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       return res.end();
     }
     if (p === '/panel/') return serveFile(res, PUBLIC_DIR, 'panel/index.html');
+    if (p === '/caption' || p === '/caption/') return serveFile(res, PUBLIC_DIR, 'caption/index.html');
     if (p === '/overlay' || p === '/overlay/') return serveFile(res, PUBLIC_DIR, 'overlay/index.html');
-    if (p.startsWith('/panel/') || p.startsWith('/overlay/') || p.startsWith('/remote/')) return serveFile(res, PUBLIC_DIR, p.slice(1));
+    if (p.startsWith('/panel/') || p.startsWith('/overlay/') || p.startsWith('/remote/') || p.startsWith('/caption/')) return serveFile(res, PUBLIC_DIR, p.slice(1));
     if (p.startsWith('/media/')) return serveFile(res, store.mediaDir, p.slice('/media/'.length));
     if (p.startsWith('/thumb/')) return serveThumb(res, p.slice('/thumb/'.length));
     return sendJson(res, 404, { error: 'not found' });
@@ -561,6 +592,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
   await refreshQr();
   syncSepay();
+  camera.sync().catch(() => {});
   await remote.sync();
 
   return {
@@ -580,6 +612,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       sepay.stop();
       twitch.disconnect();
       await remote.close();
+      await camera.close();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();
       await new Promise((r) => server.close(r));

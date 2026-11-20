@@ -8,6 +8,10 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
 - **Hiệu ứng riêng cho từng người**: phát video chào khi một ID TikTok cụ thể vào phòng hoặc tặng quà.
 - **Menu quà tặng**: danh sách quà thật của TikTok, gán hiệu ứng riêng cho từng món, và một công tắc tổng
   *Chúc mừng quà tặng* bật tắt được ngay trên điện thoại.
+- **Phụ đề dịch**: bạn nói tiếng Việt, phụ đề tiếng Anh, Trung, Hàn… hiện ngay trên live. Miễn phí, chạy qua một trang
+  mở trong Chrome (nhận giọng nói và bộ dịch có sẵn của trình duyệt), không cần khoá API.
+- **Camera chuyển động (OBS)**: zoom vào, kéo ra, rung, nghiêng, xoay theo nút bấm, theo quà hoặc giật theo nhịp nhạc;
+  xong mỗi lần camera trở về đúng chỗ cũ.
 - **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.
   Chọn một video trong thư viện ảnh của điện thoại là có ngay nút mới kèm ảnh thu nhỏ.
@@ -75,7 +79,9 @@ Mục *Ủng hộ → Nguồn khác*: bật công tắc để có link dạng `h
   trong dữ liệu ngân hàng nên thông báo ghi “Một bạn” kèm nội dung chuyển khoản.
 - TikTok có thể hạn chế việc hiện mã nhận tiền trên live; tự cân nhắc theo quy định nền tảng.
 - Video quay bằng iPhone (`.mov`) phát được khi là H.264; video HEVC cần đổi sang MP4 trước.
-- Chưa có: phụ đề dịch đa ngôn ngữ, dịch bình luận, chat YouTube / Facebook, đổi cảnh và lắc camera qua OBS,
+- Phụ đề dịch cần Chrome 138 trở lên để có bản dịch; trình duyệt cũ hơn chỉ hiện câu gốc. Camera chuyển động chỉ dùng
+  với OBS (cần bật WebSocket Server), không dùng được với TikTok LIVE Studio.
+- Chưa có: dịch bình luận của khán giả, chat YouTube / Facebook, đổi cảnh OBS, hiệu ứng bám theo người (tách nền),
   bấm hiệu ứng bằng dàn pad MIDI, hũ quà, mini-game, bảng PK.
 
 ## Phát triển

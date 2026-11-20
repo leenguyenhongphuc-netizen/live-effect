@@ -47,7 +47,7 @@ async function checkLayout(page, name) {
   note(r.small.length === 0, `${name}: vùng bấm đủ lớn${r.small.length ? ` → ${r.small.join(' | ')}` : ''}`);
 }
 
-const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Nhạc và nhịp', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
+const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
 
 try {
   // ----- Máy tính ---------------------------------------------------------
@@ -190,6 +190,39 @@ try {
   await desk.click('.card-head .switch');
   await sleep(900);
   note(await frame().evaluate(() => !window.__overlay.react.running && window.__overlay.react.embers.length === 0), 'Nhạc và nhịp: tắt công tắc thì lớp hiệu ứng nhạc tắt hẳn');
+
+  // Phụ đề: bật, gửi câu mẫu, rồi đi qua trang phụ đề bằng ô "Gõ thử".
+  await desk.click('#nav >> text=Phụ đề');
+  await desk.click('.card-head .switch');
+  await sleep(600);
+  await desk.click('text=Hiện một câu mẫu');
+  await sleep(400);
+  note((await frame().locator('#caption .tr').first().textContent()).includes('Hi everyone'), 'Phụ đề: câu mẫu hiện bản dịch trên overlay');
+  note((await frame().locator('#caption .src').textContent()).includes('Chào mọi người'), 'Phụ đề: hiện kèm câu gốc');
+  await desk.screenshot({ path: path.join(shots, '18-phu-de.png') });
+  await checkLayout(desk, 'Phụ đề');
+  const cap = await browser.newPage({ viewport: { width: 900, height: 800 } });
+  watch(cap, 'trang phụ đề');
+  await cap.goto(app.url.replace('/panel/', '/caption/'));
+  await cap.fill('#text', 'Hôm nay mình live tới mười giờ nha');
+  await cap.click('#manual button');
+  await sleep(700);
+  note((await frame().locator('#caption').textContent()).includes('Hôm nay mình live'), 'Trang phụ đề: câu gõ thử lên được overlay');
+  note((await cap.locator('#status').textContent()).length > 10, `Trang phụ đề: báo rõ tình trạng dịch (“${(await cap.locator('#status').textContent()).slice(0, 70)}…”)`);
+  await checkLayout(cap, 'Trang phụ đề');
+  await cap.screenshot({ path: path.join(shots, '19-trang-phu-de.png') });
+  await cap.close();
+
+  // Camera OBS: không có OBS thì phải báo rõ, không treo.
+  await desk.click('#nav >> text=Nhạc và nhịp');
+  await desk.locator('.card:has-text("Camera chuyển động") .switch').click();
+  await desk.waitForSelector('.card:has-text("Camera chuyển động") .note.err', { timeout: 8000 }).catch(() => {});
+  note((await desk.locator('.card:has-text("Camera chuyển động") .note').textContent()).includes('Chưa nối được OBS'), 'Camera: không có OBS thì báo rõ cách bật');
+  await desk.locator('.card:has-text("Camera chuyển động")').scrollIntoViewIfNeeded();
+  await desk.screenshot({ path: path.join(shots, '20-camera.png') });
+  await checkLayout(desk, 'Camera chuyển động');
+  await desk.locator('.card:has-text("Camera chuyển động") .switch').click();
+  await sleep(400);
 
   // Điện thoại: bật, lấy địa chỉ từ mã QR.
   await desk.click('#nav >> text=Điện thoại');

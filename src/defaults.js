@@ -56,6 +56,7 @@ const rule = (id, name, trigger, action, extra = {}) => ({
     media: '',
     mediaFit: 'cover',
     mediaKey: 'none',
+    camera: 'none',
     ...action,
   },
   ...extra,
@@ -84,6 +85,8 @@ export function defaultConfig() {
     tts: { enabled: false, chat: true, gift: true, follow: true, donate: true, voice: '', rate: 1, maxLength: 80 },
     remote: { enabled: false, token: '' },
     gifts: { celebrate: true },
+    captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
+    camera: { enabled: false, source: '', beat: 'off', amount: 2 },
     music: {
       enabled: false, source: 'system', deviceId: '', sensitivity: 1, palette: 'storm',
       layers: { lightning: true, flash: true, embers: true, pulse: true, bars: false },
@@ -188,6 +191,7 @@ function sanitizeRule(input, index) {
       media,
       mediaFit: oneOf(a.mediaFit, ['cover', 'center'], 'cover'),
       mediaKey: oneOf(a.mediaKey, ['none', 'black', 'green'], 'none'),
+      camera: oneOf(a.camera, ['none', 'zoomin', 'zoomout', 'shake', 'tilt', 'spin'], 'none'),
     },
   };
 }
@@ -200,6 +204,8 @@ export function sanitizeConfig(input) {
   const tts = c.tts && typeof c.tts === 'object' ? c.tts : {};
   const rm = c.remote && typeof c.remote === 'object' ? c.remote : {};
   const gf = c.gifts && typeof c.gifts === 'object' ? c.gifts : {};
+  const cp = c.captions && typeof c.captions === 'object' ? c.captions : {};
+  const cm = c.camera && typeof c.camera === 'object' ? c.camera : {};
   const mu = c.music && typeof c.music === 'object' ? c.music : {};
   const ly = mu.layers && typeof mu.layers === 'object' ? mu.layers : {};
   const al = w.alerts || {};
@@ -287,6 +293,18 @@ export function sanitizeConfig(input) {
       token: /^[0-9a-f]{32}$/.test(rm.token) ? rm.token : '',
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
+    camera: {
+      enabled: bool(cm.enabled, false),
+      source: str(cm.source, 120),
+      beat: oneOf(cm.beat, ['off', 'zoom', 'shake'], 'off'),
+      amount: Math.round(num(cm.amount, 1, 3, 2)),
+    },
+    captions: {
+      enabled: bool(cp.enabled, false),
+      showOriginal: bool(cp.showOriginal, true),
+      position: oneOf(cp.position, ['top', 'middle', 'bottom'], 'bottom'),
+      size: Math.round(num(cp.size, 1, 3, 2)),
+    },
     music: {
       enabled: bool(mu.enabled, false),
       source: oneOf(mu.source, ['system', 'device'], 'system'),

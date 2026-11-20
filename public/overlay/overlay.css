@@ -136,3 +136,22 @@ html, body {
 #qr-line:empty { display: none; }
 
 [hidden] { display: none !important; }
+
+/* Phụ đề dịch: chữ to, nền tối đặc để đọc được trên mọi hình nền. */
+#caption {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 88vw;
+  padding: calc(var(--u) * 0.9) calc(var(--u) * 1.8);
+  background: rgba(20, 18, 26, 0.88); border-radius: calc(var(--u) * 1.4);
+  text-align: center; pointer-events: none;
+  --cap: calc(var(--u) * 2.6);
+}
+#caption[data-size="1"] { --cap: calc(var(--u) * 2.1); }
+#caption[data-size="3"] { --cap: calc(var(--u) * 3.3); }
+#caption[data-pos="bottom"] { bottom: 24vh; }
+#caption[data-pos="middle"] { top: 52vh; }
+#caption[data-pos="top"] { top: 12vh; }
+#caption p { margin: 0; overflow-wrap: anywhere; text-wrap: balance; }
+#caption .tr { font-size: var(--cap); font-weight: 700; line-height: 1.25; }
+#caption .tr + .tr { margin-top: calc(var(--u) * 0.3); color: var(--gold); }
+#caption .src { margin-top: calc(var(--u) * 0.4); font-size: calc(var(--cap) * 0.62); line-height: 1.3; opacity: 0.82; }

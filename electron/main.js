@@ -54,7 +54,9 @@ async function createWindow() {
       .catch(() => done({}));
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\//i.test(url)) shell.openExternal(url);
+    // Trang phụ đề phải mở bằng Chrome/Edge của máy (cửa sổ này không có bộ nhận dạng giọng nói).
+    const ownCaption = ours(url) && new URL(url).pathname.startsWith('/caption');
+    if (/^https:\/\//i.test(url) || ownCaption) shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {

@@ -408,6 +408,7 @@ function ruleEditor(rule) {
       field('Cách hiện', select(a, 'mediaFit', [['cover', 'Phủ kín màn hình'], ['center', 'Nhỏ ở giữa']])),
       isVideo && field('Xoá nền video', select(a, 'mediaKey', [['none', 'Không (video WebM trong suốt hoặc phủ kín)'], ['black', 'Xoá nền đen'], ['green', 'Xoá nền xanh lá']]),
         'Dùng khi video hiệu ứng có nền đen hoặc nền xanh, để vẫn thấy hình live phía sau.')) : null,
+    field('Chuyển động camera (cần bật ở mục Nhạc và nhịp, chỉ với OBS)', select(a, 'camera', [['none', 'Không'], ...CAM_MOVES])),
     toggle(a, 'alert', 'Hiện dòng thông báo', render),
     a.alert ? field('Nội dung thông báo', textInput(a, 'text', { placeholder: 'Cảm ơn {user}!' }),
       t.type === 'donate'
@@ -510,6 +511,38 @@ function viewGifts() {
         : h('p.muted', null, 'Danh sách quà được tải từ TikTok ở lần kết nối với phiên live đầu tiên, rồi lưu lại trong máy. Trong lúc chờ, bạn vẫn tạo được kịch bản quà theo tên ở mục Kịch bản.')));
 }
 
+const CAM_MOVES = [['zoomin', 'Zoom vào rồi trả về'], ['zoomout', 'Vào cận rồi kéo ra'], ['shake', 'Rung'], ['tilt', 'Nghiêng lắc'], ['spin', 'Xoay một vòng']];
+
+// --- Mục: Phụ đề ------------------------------------------------------------
+function viewCaptions() {
+  const c = S.config.captions;
+  const url = `${location.origin}/caption/`;
+  const link = h('input.input', { type: 'text', readOnly: true, value: url, 'aria-label': 'Link trang phụ đề', onfocus: (e) => e.target.select() });
+  return h('div.view', null,
+    head('Phụ đề dịch', 'Bạn nói tiếng Việt, khán giả nước ngoài đọc được phụ đề bằng tiếng của họ ngay trên live.'),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Hiện phụ đề trên live'), toggle(c, 'enabled', c.enabled ? 'Đang bật' : 'Đang tắt', render)),
+      h('ol.steps-list', null,
+        h('li', null, 'Bấm ', h('b', null, 'Mở trang phụ đề'), '. Trang mở trong Chrome hoặc Edge của máy.'),
+        h('li', null, 'Chọn tiếng bạn nói và tối đa 2 tiếng muốn dịch sang.'),
+        h('li', null, 'Bấm ', h('b', null, 'Bắt đầu nghe'), ' và cho phép dùng micro. Giữ tab đó mở suốt buổi live.')),
+      h('div.row', null, h('div.field', null, link),
+        h('button.btn.primary', { type: 'button', onclick: () => window.open(url, '_blank', 'noopener') }, 'Mở trang phụ đề')),
+      h('p.small.muted', null, 'Miễn phí, không cần khoá. Nghe giọng nói dùng dịch vụ có sẵn của trình duyệt (cần Internet); phần dịch chạy ngay trên máy và cần Chrome 138 trở lên, lần đầu sẽ tải một gói dịch cho mỗi ngôn ngữ.')),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Cách hiện')),
+      h('div.grid2', null,
+        field('Vị trí', select(c, 'position', [['bottom', 'Phía dưới'], ['middle', 'Giữa màn hình'], ['top', 'Phía trên']])),
+        field('Cỡ chữ', select(c, 'size', [[1, 'Nhỏ'], [2, 'Vừa'], [3, 'Lớn']], () => { c.size = Number(c.size); }))),
+      toggle(c, 'showOriginal', 'Hiện kèm câu gốc bên dưới bản dịch'),
+      h('div.btn-row', null, h('button.btn', { type: 'button', onclick: async () => {
+        try {
+          const out = await api('POST', '/api/caption', { text: 'Chào mọi người, cảm ơn đã ghé xem', lines: [{ lang: 'en', text: 'Hi everyone, thanks for stopping by' }], final: true });
+          if (!out.enabled) toast('Bật công tắc “Hiện phụ đề trên live” trước đã');
+        } catch (err) { toast(err.message); }
+      } }, 'Hiện một câu mẫu'))));
+}
+
 // --- Mục: Nhạc và nhịp ------------------------------------------------------
 let panelWs = null;
 const M = { error: '', inputs: [], bar: null, lamp: null, bpm: null };
@@ -534,6 +567,29 @@ async function startListening() {
   }
   M.inputs = await listInputs();
   if (S.view === 'music') render();
+}
+
+function cameraCard() {
+  const cam = S.config.camera;
+  const st = S.status.camera || { state: 'off', sources: [] };
+  const note = !cam.enabled ? ['', 'Khi bật, Live Effect nối vào OBS và di chuyển nguồn camera: zoom, rung, nghiêng, xoay. Xong mỗi lần, camera trở về đúng chỗ cũ.']
+    : st.state === 'ready' ? ['ok', `Đã nối OBS, đang điều khiển nguồn “${st.source}”.`]
+      : st.state === 'error' ? ['err', st.error] : ['', 'Đang nối OBS…'];
+  const sources = [['', 'Tự tìm webcam trong cảnh'], ...(st.sources || []).map((x) => [x, x])];
+  if (cam.source && !sources.some(([v]) => v === cam.source)) sources.push([cam.source, cam.source]);
+  return h('section.card', null,
+    h('div.card-head', null, h('h2', null, 'Camera chuyển động (OBS)'), toggle(cam, 'enabled', cam.enabled ? 'Đang bật' : 'Đang tắt', render)),
+    h(`p.note${note[0] ? `.${note[0]}` : ''}`, { role: 'status' }, note[1]),
+    cam.enabled ? [
+      h('div.grid3', null,
+        field('Nguồn camera', select(cam, 'source', sources)),
+        field('Theo nhịp nhạc', select(cam, 'beat', [['off', 'Không'], ['zoom', 'Giật zoom mỗi nhịp'], ['shake', 'Rung mỗi nhịp']])),
+        field('Độ mạnh', select(cam, 'amount', [[1, 'Nhẹ'], [2, 'Vừa'], [3, 'Mạnh']], () => { cam.amount = Number(cam.amount); }))),
+      h('div.btn-row', null, CAM_MOVES.map(([id, name]) => h('button.btn', { type: 'button', disabled: st.state !== 'ready', onclick: async () => {
+        try { if (!(await api('POST', '/api/camera/test', { move: id })).ok) toast('OBS chưa sẵn sàng'); } catch (err) { toast(err.message); }
+      } }, name))),
+      h('p.small.muted', null, 'Muốn bấm nút là zoom: vào Kịch bản, tạo kịch bản “Nút bấm tay” rồi chọn Chuyển động camera. Nút đó hiện trên điện thoại và gán được phím tắt. TikTok LIVE Studio không cho phần mềm ngoài điều khiển camera, nên phần này chỉ dùng với OBS.'),
+    ] : null);
 }
 
 function viewMusic() {
@@ -574,7 +630,8 @@ function viewMusic() {
       h('div.layers', null, LAYERS.map(([key, name, help]) => h('div.layer', null,
         h('div.rule-text', null, h('b', null, name), h('span', null, help)), toggle(m.layers, key)))),
       field('Tông màu', select(m, 'palette', [['storm', 'Bão tím'], ['fire', 'Lửa đỏ cam'], ['ice', 'Băng xanh'], ['neon', 'Neon đổi màu theo nhịp']])),
-      h('p.small.muted', null, 'Chớp màu được giữ ở mức nhẹ và không quá 3 lần mỗi giây, để an toàn cho người xem nhạy cảm với ánh sáng nhấp nháy.')));
+      h('p.small.muted', null, 'Chớp màu được giữ ở mức nhẹ và không quá 3 lần mỗi giây, để an toàn cho người xem nhạy cảm với ánh sáng nhấp nháy.')),
+    cameraCard());
 }
 
 // --- Mục: Điện thoại --------------------------------------------------------
@@ -791,6 +848,7 @@ const VIEWS = [
   ['rules', 'Kịch bản', 'rules', viewRules],
   ['gifts', 'Quà tặng', 'giftrain', viewGifts],
   ['music', 'Nhạc và nhịp', 'music', viewMusic],
+  ['captions', 'Phụ đề', 'caption', viewCaptions],
   ['phone', 'Điện thoại', 'phone', viewPhone],
   ['donate', 'Ủng hộ', 'donate', viewDonate],
   ['display', 'Hiển thị', 'layout', viewDisplay],

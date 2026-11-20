@@ -75,6 +75,7 @@ export class Engine {
       media: action.media || '',
       mediaFit: action.mediaFit || 'cover',
       mediaKey: action.mediaKey || 'none',
+      camera: action.camera || 'none',
       alert: action.alert && action.text ? fill(action.text, ctx) : '',
       avatar: ev.avatar || '',
       image: ev.giftImage || '',

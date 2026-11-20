@@ -8,7 +8,7 @@ import { Reactive } from '/overlay/react.js';
 //   ?layers=fx,alerts...  chỉ hiện một số lớp, dùng khi muốn tách thành nhiều nguồn trong OBS
 const params = new URLSearchParams(location.search);
 const preview = params.get('preview') === '1';
-const layers = new Set((params.get('layers') || 'fx,alerts,media,chat,goal,top,qr').split(','));
+const layers = new Set((params.get('layers') || 'caption,fx,alerts,media,chat,goal,top,qr').split(','));
 const has = (name) => layers.has(name);
 
 const $ = (id) => document.getElementById(id);
@@ -206,6 +206,40 @@ function applyWidgets(next) {
   while (els.chat.children.length > widgets.chat.max) els.chat.firstElementChild.remove();
 }
 
+// --- Phụ đề dịch ------------------------------------------------------------
+let captionCfg = { enabled: false, showOriginal: true, position: 'bottom', size: 2 };
+let captionTimer = null;
+const captionEl = $('caption');
+
+function applyCaptions(cfg) {
+  if (!cfg) return;
+  captionCfg = cfg;
+  captionEl.dataset.pos = cfg.position;
+  captionEl.dataset.size = cfg.size;
+  if (!cfg.enabled) captionEl.hidden = true;
+}
+
+function showCaption({ text, lines = [], final }) {
+  if (!has('caption') || !captionCfg.enabled || !text) return;
+  // Câu đang nói dở chưa có bản dịch: giữ bản dịch của câu trước cho khỏi nhấp nháy.
+  if (!final && captionEl.querySelector('.tr') && !lines.length) {
+    const src = captionEl.querySelector('.src');
+    if (src) src.textContent = text;
+  } else {
+    const rows = lines.map((l) => { const p = document.createElement('p'); p.className = 'tr'; p.textContent = l.text; return p; });
+    if (captionCfg.showOriginal || !rows.length) {
+      const p = document.createElement('p');
+      p.className = rows.length ? 'src' : 'tr';
+      p.textContent = text;
+      rows.push(p);
+    }
+    captionEl.replaceChildren(...rows);
+  }
+  captionEl.hidden = false;
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => { captionEl.hidden = true; }, 7000);
+}
+
 function clearAll() {
   fx.clear();
   alertQueue.length = 0;
@@ -234,8 +268,10 @@ function onMessage(msg) {
     case 'widgets':
       applyWidgets(msg.widgets);
       if (has('fx')) react.setConfig(msg.music);
+      applyCaptions(msg.captions);
       break;
     case 'audio': if (has('fx')) react.onAudio(msg); break;
+    case 'caption': showCaption(msg); break;
     case 'chat': addChat(msg); break;
     case 'goal': setGoal(msg); break;
     case 'top': setTop(Array.isArray(msg.rows) ? msg.rows : []); break;
