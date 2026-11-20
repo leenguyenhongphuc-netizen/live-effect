@@ -254,6 +254,7 @@ try {
   await phone.tap('.key.mine >> text=Ăn mừng');
   await sleep(700);
   note((await particles()) > 20, `Bấm nút trên điện thoại: overlay có ${await particles()} hạt hiệu ứng`);
+  note(!(await phone.locator('#app').textContent()).includes('null') && await phone.locator('section:has-text("Camera")').count() === 0, 'Điện thoại: chưa nối OBS thì không hiện hàng nút Camera');
   await phone.tap('#celebrate');
   await sleep(500);
   note(app.config.gifts.celebrate === false && (await phone.locator('#celebrate').getAttribute('aria-pressed')) === 'false', 'Điện thoại: tắt được chúc mừng quà tặng');

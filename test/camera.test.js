@@ -145,6 +145,19 @@ test('kịch bản kèm chuyển động camera, và phụ đề chỉ lên són
     assert.ok(obs.state.transforms.length > 2, 'kịch bản phải gửi chuyển động sang OBS');
     assert.ok(obs.state.transforms.some((x) => x.sceneItemTransform.scaleX === 1.05));
 
+    // Điện thoại: thấy được camera đã sẵn sàng và bấm zoom được; tên chuyển động lạ bị từ chối.
+    const cfgR = (await call('GET', '/api/state')).config;
+    cfgR.remote.enabled = true;
+    const on = await call('PUT', '/api/config', cfgR);
+    const r = async (method, url, body) => (await fetch(`http://127.0.0.1:${on.remote.port}${url}`, { method, headers: { 'Content-Type': 'application/json', 'X-Key': on.config.remote.token }, body: body ? JSON.stringify(body) : undefined })).json();
+    assert.equal((await r('GET', '/r/state')).camera, true);
+    await wait(1600); // chờ cú rung của kịch bản ở trên chạy xong
+    obs.state.transforms.length = 0;
+    assert.deepEqual(await r('POST', '/r/fire', { camera: 'zoomin' }), { ok: true });
+    await wait(250);
+    assert.ok(obs.state.transforms.some((x) => x.sceneItemTransform.scaleX > 1.2), 'điện thoại phải zoom được camera');
+    assert.deepEqual(await r('POST', '/r/fire', { camera: 'constructor' }), { ok: false });
+
     // Phụ đề: tắt thì không lên overlay; bật thì lên, tối đa 2 bản dịch, cắt bớt chữ quá dài.
     const { default: WebSocket } = await import('ws');
     const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws?role=overlay`);

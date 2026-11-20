@@ -230,6 +230,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       status: { state: tiktok.status.state, username: tiktok.status.username, viewers: tiktok.status.viewers },
       overlays: overlayCount(),
       celebrate: store.config.gifts.celebrate,
+      camera: camera.status.state === 'ready',
       buttons: store.config.rules
         .filter((r) => r.enabled && r.trigger.type === 'button')
         .map((r) => ({ id: r.id, name: r.name, effect: r.action.effect, media: r.action.media, thumb: store.hasThumb(r.action.media) })),
@@ -237,6 +238,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     }),
     // Điện thoại chỉ được: bấm một nút, chạy một hiệu ứng có sẵn, dừng tất cả, và thêm video/hình thành nút mới.
     fire: (body) => {
+      // Chuyển động camera bấm thẳng từ điện thoại (chỉ khi đã nối OBS).
+      if (typeof body.camera === 'string') return camera.move(body.camera, { duration: 2.5 });
       if (typeof body.celebrate === 'boolean') {
         store.set({ ...store.config, gifts: { ...store.config.gifts, celebrate: body.celebrate } });
         broadcast('panel', { type: 'config', config: store.config });

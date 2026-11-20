@@ -12,6 +12,7 @@ import { readObsLocalConfig, OBS_INPUT_NAME } from './obs.js';
 const sha = (text) => crypto.createHash('sha256').update(text).digest('base64');
 const CAMERA_KINDS = ['dshow_input', 'av_capture_input', 'av_capture_input_v2', 'v4l2_input', 'decklink-input'];
 const GAIN = [0.6, 1, 1.5];
+export const PUBLIC_MOVES = ['zoomin', 'zoomout', 'shake', 'tilt', 'spin'];
 const TICK_MS = 33;
 const easeOut = (x) => 1 - (1 - x) ** 3;
 const easeInOut = (x) => (x < 0.5 ? 4 * x ** 3 : 1 - ((-2 * x + 2) ** 3) / 2);
@@ -217,7 +218,7 @@ export class ObsCamera {
   }
 
   #play(kind, seconds, strength, priority) {
-    if (!this.ready || !this.item || !MOVES[kind]) return false;
+    if (!this.ready || !this.item || !Object.hasOwn(MOVES, kind)) return false;
     // Chuyển động do nút bấm / quà được ưu tiên hơn cú giật theo nhịp.
     if (this.anim && this.anim.priority > priority) return false;
     this.#stopAnim();
@@ -240,6 +241,8 @@ export class ObsCamera {
 
   /** Chuyển động do kịch bản hoặc nút bấm gọi. */
   move(kind, { duration = 2 } = {}) {
+    // Chỉ nhận đúng năm kiểu công khai; tên lạ (kể cả tên có sẵn của đối tượng JavaScript) bị từ chối.
+    if (!PUBLIC_MOVES.includes(kind)) return false;
     const cap = { shake: 1.5, spin: 1.4, tilt: 3 }[kind] || 12;
     return this.#play(kind, Math.min(cap, Math.max(0.4, duration)), 1, 2);
   }

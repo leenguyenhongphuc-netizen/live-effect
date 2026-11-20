@@ -163,7 +163,7 @@ picker.addEventListener('change', () => {
 
 function draw(state) {
   // Chỉ dựng lại lưới nút khi danh sách nút thay đổi, để không giật khi đang bấm.
-  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate]);
+  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate, state.camera]);
   if (shape === lastShape) return;
   lastShape = shape;
   const mine = state.buttons.map((b) =>
@@ -185,7 +185,12 @@ function draw(state) {
     try { await call('POST', '/r/fire', { celebrate: !on }); } catch (err) { if (err.auth) return needPairing(); }
     return refresh();
   });
-  app.replaceChildren(sw, mySection, quickSection);
+  // Camera chuyển động: chỉ hiện khi máy tính đã nối được OBS.
+  const CAM = [['zoomin', 'Zoom vào'], ['zoomout', 'Kéo ra'], ['shake', 'Rung'], ['tilt', 'Nghiêng lắc'], ['spin', 'Xoay vòng']];
+  const camSection = state.camera
+    ? el('section', '', el('h2', '', 'Camera'), el('div', 'grid', ...CAM.map(([id, name]) => keyButton(name, 'camera', { camera: id }, false))))
+    : null;
+  app.replaceChildren(...[sw, mySection, camSection, quickSection].filter(Boolean));
 }
 
 function needPairing() {
