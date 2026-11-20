@@ -705,6 +705,8 @@ function viewCaptions() {
         field('Vị trí', select(c, 'position', [['bottom', 'Phía dưới'], ['middle', 'Giữa màn hình'], ['top', 'Phía trên']])),
         field('Cỡ chữ', select(c, 'size', [[1, 'Nhỏ'], [2, 'Vừa'], [3, 'Lớn']], () => { c.size = Number(c.size); }))),
       toggle(c, 'showOriginal', 'Hiện kèm câu gốc bên dưới bản dịch'),
+      toggle(c, 'translateChat', 'Dịch bình luận của khán giả sang tiếng của bạn (cần đang mở trang phụ đề)'),
+      h('p.small.muted', null, 'Bản dịch hiện dưới từng bình luận trong mục Nhật ký. Nếu đang bật giọng đọc bình luận thì ứng dụng đọc bản dịch thay cho câu gốc.'),
       h('div.btn-row', null, h('button.btn', { type: 'button', onclick: async () => {
         try {
           const out = await api('POST', '/api/caption', { text: 'Chào mọi người, cảm ơn đã ghé xem', lines: [{ lang: 'en', text: 'Hi everyone, thanks for stopping by' }], final: true });
@@ -1090,6 +1092,7 @@ function logRow(e) {
     h('time', null, new Date(e.at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })),
     h('span.kind', null, KIND[e.type] || e.type, e.simulated ? ' (thử)' : ''),
     h('span.what', null, h('b', null, e.nickname || e.user || 'Ai đó'), ` ${what}`,
+      e.translated ? h('small.tr', null, `Dịch: ${e.translated}`) : null,
       ran.length ? h('small', null, `Đã chạy: ${ran.join(', ')}`) : null));
 }
 const HOOK_EVENTS = [['gift', 'Quà'], ['follow', 'Follow'], ['share', 'Chia sẻ'], ['donate', 'Chuyển khoản'], ['like', 'Tim'], ['chat', 'Bình luận'], ['jar', 'Hũ đầy'], ['game', 'Trò chơi'], ['timer', 'Hết giờ']];
@@ -1212,6 +1215,10 @@ function connectWs() {
         if (list) list.prepend(logRow(msg.event)); else render();
       }
     } else if (msg.type === 'media') { S.media = msg.media; softRender(); }
+    else if (msg.type === 'chatTranslated') {
+      const entry = S.log.find((e) => e.id === msg.id);
+      if (entry) { entry.translated = msg.text; if (S.view === 'log') render(); }
+    }
     else if (msg.type === 'auction') { S.auctionState = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'game') { S.game = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'timer') { S.timer = msg; if (S.view === 'display') softRender(); }

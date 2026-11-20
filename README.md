@@ -18,6 +18,9 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
 - **Điều khiển OBS theo kịch bản**: đổi cảnh rồi tự quay về, ẩn hiện nguồn.
 - **Trò chơi Hộp bí ẩn**: khán giả gõ số để mở hộp, ai mở trúng bẫy thì thua.
 - **Webhook gửi ra ngoài**: đẩy sự kiện sang Discord, n8n, Make…
+- **Nhạc nền** (tự nhỏ tiếng khi có video, khán giả gõ `!nhac 2` để chọn bài) và **cảnh vật trước ống kính** (video lặp phủ lên hình live).
+- **Đấu giá bằng quà**, **bóng bay quà**, **video nửa màn hình**.
+- **Dịch bình luận** của khán giả nước ngoài sang tiếng của bạn (qua trang phụ đề trong Chrome).
 - **Hũ quà**: quà rơi vào một chiếc hũ trên màn hình, xếp chồng lên nhau; đủ số xu thì hũ vỡ ra ăn mừng rồi bắt đầu lại.
 - **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.

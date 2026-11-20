@@ -182,8 +182,9 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (msg.type === 'fx') queue.push(msg); else broadcast('overlay', msg);
   });
 
+  let logSeq = 0;
   const record = (ev, fired) => {
-    const entry = { ...ev, at: Date.now(), fired };
+    const entry = { ...ev, at: Date.now(), fired, id: ++logSeq };
     webhook.send(entry);
     log.push(entry);
     if (log.length > 200) log.shift();
@@ -194,6 +195,23 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (catalog.merge(list)) broadcast('panel', { type: 'gifts', gifts: catalog.list() });
   };
   tiktok.on('gifts', mergeGifts);
+
+  // --- Dịch bình luận: gửi bình luận sang trang phụ đề (Chrome) để dịch, chờ tối đa 3 giây ---
+  const pendingChat = new Map();
+  const captionClients = () => [...clients].filter((c) => c.role === 'caption' && c.ws.readyState === 1);
+  const translating = () => store.config.captions.translateChat && captionClients().length > 0;
+  const askTranslation = (entry) => {
+    const tts = store.config.tts;
+    const speak = (translated) => {
+      if (tts.enabled && tts.chat) broadcast('panel', { type: 'tts', text: `${entry.nickname || entry.user || 'bạn'} nói ${String(translated || entry.text).slice(0, tts.maxLength)}` });
+    };
+    const timer = setTimeout(() => { pendingChat.delete(entry.id); speak(''); }, 3000);
+    timer.unref?.();
+    pendingChat.set(entry.id, { entry, timer, speak });
+    if (pendingChat.size > 200) pendingChat.delete(pendingChat.keys().next().value);
+    const data = JSON.stringify({ type: 'chat', id: entry.id, text: String(entry.text).slice(0, 300) });
+    for (const c of captionClients()) c.ws.send(data);
+  };
 
   const ingest = (ev) => {
     if (ev.type === 'gift' && ev.giftId && !ev.simulated) {
@@ -230,11 +248,13 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     }
     // Người vào xem xuất hiện dồn dập; chỉ ghi nhật ký khi có kịch bản chạy.
     if (ev.type !== 'join' || (fired.length && !greeted)) record(ev, fired);
+    if (ev.type === 'chat' && ev.text && translating()) askTranslation(log.at(-1));
     const tts = store.config.tts;
     if (tts.enabled) {
       const who = ev.nickname || ev.user || 'bạn';
       let say = '';
-      if (ev.type === 'chat' && tts.chat && ev.text) say = `${who} nói ${String(ev.text).slice(0, tts.maxLength)}`;
+      // Đang bật dịch bình luận và có trang phụ đề mở: chờ bản dịch rồi mới đọc (xem askTranslation).
+      if (ev.type === 'chat' && tts.chat && ev.text && !translating()) say = `${who} nói ${String(ev.text).slice(0, tts.maxLength)}`;
       else if (ev.type === 'gift' && tts.gift) say = `Cảm ơn ${who} đã tặng ${ev.count || 1} ${ev.giftName || 'quà'}`;
       else if (ev.type === 'follow' && tts.follow && fired.length) say = `Cảm ơn ${who} đã follow`;
       else if (ev.type === 'donate' && tts.donate) say = `Cảm ơn ${who} đã ủng hộ ${ev.amount || 0} đồng. ${String(ev.text || '').slice(0, tts.maxLength)}`;
@@ -451,6 +471,22 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
     if (route === 'POST /api/twitch/disconnect') {
       twitch.disconnect();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/caption/chat') {
+      // Trang phụ đề trả về bản dịch của một bình luận (hoặc báo không cần dịch).
+      const body = await readJson(req);
+      const wait = pendingChat.get(Number(body.id));
+      if (!wait) return sendJson(res, 200, { ok: false });
+      pendingChat.delete(Number(body.id));
+      clearTimeout(wait.timer);
+      const text = typeof body.text === 'string' ? body.text.trim().slice(0, 300) : '';
+      if (text) {
+        wait.entry.translated = text;
+        broadcast('panel', { type: 'chatTranslated', id: wait.entry.id, text });
+      }
+      wait.speak(text);
       return sendJson(res, 200, { ok: true });
     }
 
@@ -682,7 +718,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     wss.handleUpgrade(req, socket, head, (ws) => {
       const client = {
         ws,
-        role: url.searchParams.get('role') === 'panel' ? 'panel' : 'overlay',
+        // 'caption' là trang phụ đề mở trong Chrome: nhận bình luận để dịch, không tính là overlay.
+        role: ['panel', 'caption'].includes(url.searchParams.get('role')) ? url.searchParams.get('role') : 'overlay',
         preview: url.searchParams.get('preview') === '1',
       };
       clients.add(client);

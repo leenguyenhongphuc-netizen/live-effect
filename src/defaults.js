@@ -106,7 +106,7 @@ export function defaultConfig() {
     tts: { enabled: false, chat: true, gift: true, follow: true, donate: true, voice: '', rate: 1, maxLength: 80 },
     remote: { enabled: false, token: '' },
     gifts: { celebrate: true },
-    captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
+    captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2, translateChat: false },
     jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
     greet: { enabled: false, once: true, tiers: defaultGreetTiers() },
     webhook: { enabled: false, url: '', events: ['gift', 'follow', 'share', 'donate'] },
@@ -433,6 +433,7 @@ export function sanitizeConfig(input) {
     captions: {
       enabled: bool(cp.enabled, false),
       showOriginal: bool(cp.showOriginal, true),
+      translateChat: bool(cp.translateChat, false),
       position: oneOf(cp.position, ['top', 'middle', 'bottom'], 'bottom'),
       size: Math.round(num(cp.size, 1, 3, 2)),
     },

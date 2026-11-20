@@ -175,6 +175,51 @@ $('manual').addEventListener('submit', (e) => {
   if (text) publish(text);
 });
 
+// --- Dịch bình luận của khán giả ---------------------------------------------
+// Live Effect gửi từng bình luận sang đây; trang nhận diện ngôn ngữ, nếu khác tiếng của
+// bạn thì dịch sang tiếng của bạn rồi gửi trả. Bình luận cùng tiếng thì trả về rỗng.
+let detector = null;
+async function detect(text) {
+  if (!('LanguageDetector' in self) || text.trim().length < 4) return '';
+  try {
+    detector = detector || await self.LanguageDetector.create();
+    const [best] = await detector.detect(text);
+    return best && best.confidence > 0.5 ? String(best.detectedLanguage).split('-')[0] : '';
+  } catch {
+    return '';
+  }
+}
+
+async function translateChat({ id, text }) {
+  let out = '';
+  const from = await detect(text);
+  if (from && from !== 'und' && from !== state.source) {
+    const slot = prepare(from, state.source);
+    if (slot.state === 'ready') {
+      const r = await Promise.race([slot.tr.translate(text).catch(() => null), timeout(2500)]);
+      if (typeof r === 'string' && r.trim() && r.trim().toLowerCase() !== text.trim().toLowerCase()) out = r.trim();
+    }
+  }
+  fetch('/api/caption/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text: out }) }).catch(() => {});
+  if (out) {
+    const box = $('chatlog');
+    const row = document.createElement('p');
+    row.textContent = `${text}  →  ${out}`;
+    box.prepend(row);
+    while (box.children.length > 6) box.lastElementChild.remove();
+    $('chatcard').hidden = false;
+  }
+}
+
+function listen() {
+  const ws = new WebSocket(`ws://${location.host}/ws?role=caption`);
+  ws.onmessage = (e) => {
+    try { const msg = JSON.parse(e.data); if (msg.type === 'chat') translateChat(msg); } catch { /* bỏ qua tin hỏng */ }
+  };
+  ws.onclose = () => setTimeout(listen, 2000);
+}
+listen();
+
 // --- Chọn ngôn ngữ ----------------------------------------------------------
 for (const [code, , name] of LANGS) $('source').append(new Option(name, code));
 $('source').value = state.source;

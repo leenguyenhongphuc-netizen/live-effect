@@ -516,3 +516,47 @@ test('đấu giá: tổng xu là giá trả, quà giây cuối kéo dài giờ, 
     assert.deepEqual([a.state().running, a.state().winner, a.state().bidders], [false, null, 0]);
   } finally { a.close(); }
 });
+
+test('dịch bình luận: gửi sang trang phụ đề, nhận bản dịch về nhật ký và giọng đọc; không có trang thì đọc câu gốc', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'le-tr-'));
+  const app = await startApp({ dataDir, port: 0 });
+  const base = `http://127.0.0.1:${app.port}`;
+  const call = async (method, url, body) => (await fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
+  const { default: WebSocket } = await import('ws');
+  const open = async (role) => { const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws?role=${role}`); const msgs = []; ws.on('message', (d) => msgs.push(JSON.parse(d))); await new Promise((r) => ws.on('open', r)); return { ws, msgs }; };
+  try {
+    const { config } = await call('GET', '/api/state');
+    config.captions.translateChat = true;
+    config.tts = { ...config.tts, enabled: true, chat: true };
+    await call('PUT', '/api/config', config);
+    const panel = await open('panel');
+    // Chưa mở trang phụ đề: đọc ngay câu gốc, không chờ.
+    app.ingest({ type: 'chat', user: 'tom', nickname: 'Tom', text: 'hello everyone' });
+    await until(() => panel.msgs.some((m) => m.type === 'tts'));
+    assert.equal(panel.msgs.find((m) => m.type === 'tts').text, 'Tom nói hello everyone');
+
+    const cap = await open('caption');
+    assert.equal((await call('GET', '/api/state')).status.overlays, 0); // trang phụ đề không bị tính là overlay
+    panel.msgs.length = 0;
+    app.ingest({ type: 'chat', user: 'tom', nickname: 'Tom', text: 'you sing so well' });
+    await until(() => cap.msgs.some((m) => m.type === 'chat'));
+    const asked = cap.msgs.find((m) => m.type === 'chat');
+    assert.equal(asked.text, 'you sing so well');
+    assert.equal(panel.msgs.filter((m) => m.type === 'tts').length, 0); // đang chờ bản dịch
+    assert.deepEqual(await call('POST', '/api/caption/chat', { id: asked.id, text: '  bạn hát hay quá  ' }), { ok: true });
+    await until(() => panel.msgs.some((m) => m.type === 'tts'));
+    assert.deepEqual(panel.msgs.find((m) => m.type === 'chatTranslated'), { type: 'chatTranslated', id: asked.id, text: 'bạn hát hay quá' });
+    assert.equal(panel.msgs.find((m) => m.type === 'tts').text, 'Tom nói bạn hát hay quá');
+    assert.deepEqual(await call('POST', '/api/caption/chat', { id: asked.id, text: 'gửi lần hai' }), { ok: false }); // mỗi bình luận chỉ nhận một bản dịch
+    assert.equal((await call('GET', '/api/state')).log.at(-1).translated, 'bạn hát hay quá');
+    // Trang phụ đề báo không cần dịch (cùng tiếng): đọc câu gốc.
+    panel.msgs.length = 0;
+    app.ingest({ type: 'chat', user: 'an', nickname: 'An', text: 'chào chị' });
+    await until(() => cap.msgs.filter((m) => m.type === 'chat').length === 2);
+    await call('POST', '/api/caption/chat', { id: cap.msgs.filter((m) => m.type === 'chat')[1].id, text: '' });
+    await until(() => panel.msgs.some((m) => m.type === 'tts'));
+    assert.equal(panel.msgs.find((m) => m.type === 'tts').text, 'An nói chào chị');
+    assert.equal(panel.msgs.some((m) => m.type === 'chatTranslated'), false);
+    panel.ws.close(); cap.ws.close();
+  } finally { await app.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
