@@ -62,6 +62,7 @@ const rule = (id, name, trigger, action, extra = {}) => ({
     media: '',
     mediaFit: 'cover',
     mediaKey: 'none',
+    zone: '',
     camera: 'none',
     scene: '',
     sceneReturn: true,
@@ -77,6 +78,14 @@ const donateRule = () => rule('r-donate', 'Cảm ơn ủng hộ', { type: 'donat
 });
 
 export const CONFIG_VERSION = 2;
+
+// Vùng ánh xạ: phần của khung hình mà clip được đặt vào (trần, tường sau, sàn), tính theo
+// phần trăm khung hình và riêng cho từng góc máy, vì mỗi camera nhìn căn phòng một kiểu.
+export const ZONE_IDS = ['ceiling', 'wall', 'floor'];
+const ZONE_DEFAULT = { ceiling: { x: 0, y: 0, w: 100, h: 30 }, wall: { x: 10, y: 18, w: 80, h: 45 }, floor: { x: 0, y: 74, w: 100, h: 26 } };
+function defaultZones() {
+  return Object.fromEntries(ZONE_IDS.map((id) => [id, { feather: 18, 1: { ...ZONE_DEFAULT[id] }, 2: { ...ZONE_DEFAULT[id] } }]));
+}
 
 const GREET_TIERS = { special: 0, top1: 0, top3: 0, top10: 0, level: 30, fan: 10, back: 30, regular: 5 };
 const GREET_TEXT = {
@@ -113,7 +122,7 @@ export function defaultConfig() {
     scenery: { enabled: false, media: '', key: 'none', opacity: 1 },
     bgm: { enabled: false, tracks: [], volume: 0.5, duck: 'lower', shuffle: false, showCard: true, requests: true, position: 'top-left' },
     auction: { item: '', seconds: 120, extend: true, position: 'top-right' },
-    stage: { cam1: '', cam2: '', beatSwitch: 0, shows: [] },
+    stage: { cam1: '', cam2: '', beatSwitch: 0, shows: [], zones: defaultZones() },
     game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
@@ -228,6 +237,7 @@ function sanitizeRule(input, index) {
       mediaFit: oneOf(a.mediaFit, ['cover', 'center', 'top', 'bottom'], 'cover'),
       mediaKey: oneOf(a.mediaKey, ['none', 'black', 'green'], 'none'),
       camera: oneOf(a.camera, ['none', 'zoomin', 'zoomout', 'shake', 'tilt', 'spin'], 'none'),
+      zone: oneOf(a.zone, ['', 'ceiling', 'wall', 'floor'], ''),
       scene: str(a.scene, 120),
       sceneReturn: bool(a.sceneReturn, true),
       source: str(a.source, 120),
@@ -396,11 +406,22 @@ export function sanitizeConfig(input) {
             mediaKey: oneOf(cu?.mediaKey, ['none', 'black', 'green'], 'none'),
             camera: oneOf(cu?.camera, ['none', 'zoomin', 'zoomout', 'shake', 'tilt', 'spin'], 'none'),
             cam: [1, 2].includes(Number(cu?.cam)) ? Number(cu.cam) : 0,
+            zone: oneOf(cu?.zone, ['', 'ceiling', 'wall', 'floor'], ''),
+            hold: bool(cu?.hold, false),
           };
         }).sort((a, b) => a.t - b.t);
         return { id: str(sh?.id, 40).replace(/[^\w-]/g, '') || `show-${i}`, name: str(sh?.name, 60) || 'Bài diễn', track: tr && tr.kind === 'audio' ? tr.name : '', cues };
       });
-      return { cam1: str(sg.cam1, 120), cam2: str(sg.cam2, 120), beatSwitch: Math.round(num(sg.beatSwitch, 0, 64, 0)), shows };
+      const zn = sg.zones && typeof sg.zones === 'object' ? sg.zones : {};
+      const zones = Object.fromEntries(Object.entries(defaultZones()).map(([id, def]) => {
+        const z = zn[id] && typeof zn[id] === 'object' ? zn[id] : {};
+        const rect = (r, d) => {
+          const x = num(r?.x, 0, 95, d.x); const y = num(r?.y, 0, 95, d.y);
+          return { x, y, w: num(r?.w, 5, 100 - x, Math.min(d.w, 100 - x)), h: num(r?.h, 5, 100 - y, Math.min(d.h, 100 - y)) };
+        };
+        return [id, { feather: num(z.feather, 0, 45, def.feather), 1: rect(z[1], def[1]), 2: rect(z[2], def[2]) }];
+      }));
+      return { cam1: str(sg.cam1, 120), cam2: str(sg.cam2, 120), beatSwitch: Math.round(num(sg.beatSwitch, 0, 64, 0)), shows, zones };
     })(),
     auction: (() => {
       const au = c.auction && typeof c.auction === 'object' ? c.auction : {};

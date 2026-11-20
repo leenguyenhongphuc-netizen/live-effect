@@ -214,9 +214,14 @@ details.adv[open] > summary { margin-bottom: 10px; }
 .layer:first-child { border-top: 0; }
 
 /* --- Sân khấu -------------------------------------------------------------- */
-.cue { display: grid; grid-template-columns: 84px repeat(5, minmax(0, 1fr)) 44px; gap: 8px; align-items: end; padding-top: 10px; border-top: 1px solid var(--line); }
+.cue { display: grid; grid-template-columns: 84px repeat(6, minmax(0, 1fr)) auto 44px; gap: 8px; align-items: end; padding-top: 10px; border-top: 1px solid var(--line); }
+@media (max-width: 1500px) { .cue { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 1180px) { .cue { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .cue { grid-template-columns: 1fr 1fr; } }
+
+.zone-row { display: grid; grid-template-columns: 88px repeat(5, minmax(0, 1fr)); gap: 8px; align-items: end; padding-top: 10px; border-top: 1px solid var(--line); }
+.zone-row > b { align-self: center; }
+@media (max-width: 620px) { .zone-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } .zone-row > b { grid-column: 1 / -1; } }
 
 /* --- Trò chơi -------------------------------------------------------------- */
 .board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }

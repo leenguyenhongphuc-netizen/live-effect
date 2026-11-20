@@ -285,6 +285,31 @@ try {
   await desk.click('.rule-actions >> text=Dừng');
   await desk.click('#clear-all');
 
+  // Vùng ánh xạ: clip đặt lên "trần" chỉ chiếm đúng vùng trần, có mép mờ; đổi góc máy thì vùng dời theo.
+  {
+    const cfgZ = JSON.parse(JSON.stringify(app.config));
+    cfgZ.stage.cam1 = 'Cận'; cfgZ.stage.cam2 = 'Toàn';
+    cfgZ.stage.zones.ceiling[2] = { x: 20, y: 10, w: 60, h: 20 };
+    cfgZ.stage.shows = [{ id: 'zshow', name: 'Thử vùng', track: '', cues: [{ t: 0, media: 'rong lua.webm', mediaKey: 'black', zone: 'ceiling', hold: true }, { t: 30, effect: 'snow' }] }];
+    await fetch(`http://127.0.0.1:${app.port}/api/config`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfgZ) });
+    const post = (body) => fetch(`http://127.0.0.1:${app.port}/api/stage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    await post({ action: 'start', id: 'zshow' });
+    await sleep(900);
+    const zr = () => frame().evaluate(() => { const z = document.querySelector('#zones .zone'); if (!z) return null; const r = z.getBoundingClientRect(); return { top: r.top / innerHeight, h: r.height / innerHeight, w: r.width / innerWidth, mask: getComputedStyle(z).maskImage.includes('gradient'), canvas: Boolean(z.querySelector('canvas')), full: document.querySelectorAll('#media > *').length }; });
+    const z1 = await zr();
+    note(z1 && Math.abs(z1.top) < 0.01 && Math.abs(z1.h - 0.3) < 0.01 && Math.abs(z1.w - 1) < 0.01 && z1.full === 0, `Vùng ánh xạ: clip chỉ chiếm vùng trần (cao ${Math.round((z1?.h || 0) * 100)}% khung), không phủ kín màn hình`);
+    note(z1 && z1.mask && z1.canvas, 'Vùng ánh xạ: mép vùng được làm mờ và nền đen của clip được xoá');
+    await post({ action: 'cam', cam: 2 });
+    await sleep(800);
+    const z2 = await zr();
+    note(z2 && Math.abs(z2.top - 0.1) < 0.01 && Math.abs(z2.w - 0.6) < 0.01, 'Vùng ánh xạ: đổi sang camera 2 thì clip dời tới vùng trần của camera 2');
+    await desk.screenshot({ path: path.join(shots, '28-vung-anh-xa.png') });
+    await post({ action: 'stop' });
+    await sleep(800);
+    note((await frame().locator('#zones .zone').count()) === 0, 'Vùng ánh xạ: dừng bài diễn thì clip trên vùng tắt');
+    await post({ action: 'cam', cam: 1 });
+  }
+
   // Trò chơi: bật, khán giả gõ số để mở hộp, chủ phòng bấm mở cho tới khi trúng bẫy.
   await desk.click('#nav >> text=Trò chơi');
   await desk.click('.card-head .switch');

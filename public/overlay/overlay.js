@@ -6,6 +6,7 @@ import { JarView } from '/overlay/jar.js';
 import { Extras } from '/overlay/extras.js';
 import { GameView } from '/overlay/game.js';
 import { Scenery, Bgm } from '/overlay/bgm.js';
+import { Zones } from '/overlay/zones.js';
 
 // Tham số trên link:
 //   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
@@ -23,6 +24,7 @@ const extras = new Extras(document.body);
 const game = new GameView(document.body);
 const scenery = new Scenery(document.body);
 const bgm = new Bgm(document.body, preview);
+const zones = new Zones(document.body);
 const showAudio = new Audio();
 showAudio.addEventListener('ended', () => { bgm.duck(false); if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'showEnded' })); });
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
@@ -261,6 +263,7 @@ function showCaption({ text, lines = [], final }) {
 }
 
 function clearAll() {
+  zones.clear();
   fx.clear();
   alertQueue.length = 0;
   mediaQueue.length = 0;
@@ -282,6 +285,7 @@ function onMessage(msg) {
         }
         playSound(msg.sound, preview);
       }
+      if (msg.zone && msg.zoneMedia && has('media')) zones.play(msg.zone, msg.zoneMedia, msg.mediaKey, msg.zoneLoop);
       pushAlert(msg.alert, msg.avatar, msg.duration);
       pushMedia(msg.media, msg.duration, msg.mediaFit, msg.mediaKey, msg.id);
       break;
@@ -293,6 +297,7 @@ function onMessage(msg) {
       if (has('extras')) extras.setConfig(msg.extras);
       if (has('game')) game.setConfig(msg.game);
       if (has('scenery')) scenery.setConfig(msg.scenery);
+      zones.setConfig(msg.zones);
       if (has('extras')) extras.setAuctionPos(msg.auction?.position);
       if (has('bgm')) bgm.setConfig(msg.bgm);
       break;
@@ -304,7 +309,10 @@ function onMessage(msg) {
       break;
     case 'bgm': if (has('bgm')) bgm.cmd(msg); break;
     case 'auction': if (has('extras')) extras.onAuction(msg); break;
+    case 'stage': zones.setCam(msg.cam); break;
+    case 'zonepreview': zones.preview(msg.cam); break;
     case 'show':
+      zones.clear();
       // Nhạc của bài diễn: phát từ đầu khi bắt đầu, dừng hẳn khi kết thúc. Nhạc nền nhường chỗ.
       showAudio.pause();
       if (msg.cmd === 'start' && msg.track && !preview) {
@@ -351,4 +359,4 @@ applyWidgets(widgets);
 connect();
 
 // Cho phép kiểm thử tự động đọc trạng thái.
-window.__overlay = { fx, react, jar, extras, game, scenery, bgm, onMessage };
+window.__overlay = { zones, fx, react, jar, extras, game, scenery, bgm, onMessage };

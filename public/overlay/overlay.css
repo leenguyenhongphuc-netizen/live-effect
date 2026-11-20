@@ -228,3 +228,10 @@ html, body {
 #xauction .xrows { text-align: left; }
 #xauction .win { font-size: calc(var(--u) * 2); font-weight: 800; color: var(--gold); overflow-wrap: anywhere; }
 #xauction .gh { opacity: 0.85; }
+
+/* Vùng ánh xạ */
+#zones { position: fixed; inset: 0; pointer-events: none; }
+.zone { position: absolute; overflow: hidden; animation: media-fade 600ms ease-out both; transition: left 400ms, top 400ms, width 400ms, height 400ms, opacity 450ms; }
+.zone.out { opacity: 0; }
+.zone > * { width: 100%; height: 100%; object-fit: cover; display: block; }
+.zone-guide { position: absolute; display: grid; place-items: center; border: calc(var(--u) * 0.25) dashed var(--gold); background: rgba(255, 207, 74, 0.12); font-size: calc(var(--u) * 1.8); font-weight: 700; }

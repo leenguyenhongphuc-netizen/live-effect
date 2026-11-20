@@ -75,7 +75,10 @@ export class Engine {
       intensity: action.intensity || 2,
       duration: action.duration || 5,
       sound: action.sound || 'none',
-      media: action.media || '',
+      // Clip đặt vào một vùng (trần, tường, sàn) không chiếm màn hình nên không phải xếp hàng.
+      media: action.zone ? '' : action.media || '',
+      zone: action.zone || '',
+      zoneMedia: action.zone ? action.media || '' : '',
       mediaFit: action.mediaFit || 'cover',
       mediaKey: action.mediaKey || 'none',
       camera: action.camera || 'none',

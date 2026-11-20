@@ -462,6 +462,7 @@ function ruleEditor(rule) {
         visual.length ? null : 'Thêm tệp ở mục Hiển thị → Thư viện.'),
       field('Âm thanh', select(a, 'sound', [['none', 'Không'], ...sounds.map((s) => [s.id, s.name]), ...audio.map((m) => [`file:${m}`, m])], render))),
     a.media ? h('div.grid2', null,
+      field('Đặt vào', select(a, 'zone', [['', 'Toàn màn hình'], ['ceiling', 'Trần'], ['wall', 'Tường sau'], ['floor', 'Sàn']], render), a.zone ? 'Clip chỉ hiện ở vùng này và không phải xếp hàng. Chỉnh vùng ở mục Sân khấu.' : null),
       field('Cách hiện', select(a, 'mediaFit', [['cover', 'Phủ kín màn hình'], ['top', 'Nửa trên màn hình'], ['bottom', 'Nửa dưới màn hình'], ['center', 'Nhỏ ở giữa']])),
       isVideo && field('Xoá nền video', select(a, 'mediaKey', [['none', 'Không (video WebM trong suốt hoặc phủ kín)'], ['black', 'Xoá nền đen'], ['green', 'Xoá nền xanh lá']]),
         'Dùng khi video hiệu ứng có nền đen hoặc nền xanh, để vẫn thấy hình live phía sau.')) : null,
@@ -584,9 +585,11 @@ function showBlock(show) {
     field('Giây thứ', numInput(cue, 't', { min: 0, max: 3600, step: 0.5 })),
     field('Hiệu ứng', select(cue, 'effect', [['none', 'Không'], ...S.catalog.effects.map((e) => [e.id, e.name])])),
     field('Clip / hình', select(cue, 'media', [['', 'Không'], ...visuals.map((m) => [m, m])])),
+    field('Đặt vào', select(cue, 'zone', [['', 'Toàn màn hình'], ['ceiling', 'Trần'], ['wall', 'Tường sau'], ['floor', 'Sàn']], render)),
     field('Xoá nền', select(cue, 'mediaKey', [['none', 'Không'], ['black', 'Nền đen'], ['green', 'Nền xanh']])),
     field('Camera', select(cue, 'camera', [['none', 'Giữ nguyên'], ...CAM_MOVES])),
     field('Góc máy', select(cue, 'cam', [[0, 'Giữ nguyên'], [1, 'Camera 1'], [2, 'Camera 2']], () => { cue.cam = Number(cue.cam); })),
+    cue.zone ? toggle(cue, 'hold', 'Lặp tới mốc sau') : h('span'),
     h('button.btn.icon.ghost', { type: 'button', title: 'Xoá mốc', 'aria-label': 'Xoá mốc', onclick: () => { show.cues = show.cues.filter((x) => x !== cue); save(); render(); } }, icon('trash')));
   return h('div.rule', { 'data-show': show.id },
     h('div.rule-row', null,
@@ -610,6 +613,24 @@ function showBlock(show) {
         h('button.btn.danger', { type: 'button', onclick: () => { sg.shows = sg.shows.filter((x) => x !== show); S.openShow = null; save(); render(); } }, icon('trash'), 'Xoá bài diễn'))) : null);
 }
 
+function zoneCard() {
+  const z = S.config.stage.zones;
+  const cam = S.zoneCam || 1;
+  const names = { ceiling: 'Trần', wall: 'Tường sau', floor: 'Sàn' };
+  const show = () => act('/api/stage', { action: 'zones', cam });
+  const pct = (obj, key, max = 100) => numInput(obj, key, { min: 0, max }, show);
+  return h('section.card', null,
+    h('div.card-head', null, h('h2', null, 'Vùng ánh xạ'),
+      seg([[1, 'Camera 1'], [2, 'Camera 2']], cam, (v) => { S.zoneCam = v; render(); act('/api/stage', { action: 'zones', cam: v }); }, 'Góc máy')),
+    h('p.muted', null, 'Đánh dấu trần, tường sau và sàn trên khung hình của từng góc máy. Clip đặt vào vùng nào sẽ chỉ hiện ở vùng đó, mép mờ dần, để căn phòng như mở ra mà không che người diễn. Số là phần trăm khung hình.'),
+    Object.entries(names).map(([id, name]) => h('div.zone-row', null,
+      h('b', null, name),
+      field('Cách trái', pct(z[id][cam], 'x', 95)), field('Cách trên', pct(z[id][cam], 'y', 95)),
+      field('Rộng', pct(z[id][cam], 'w')), field('Cao', pct(z[id][cam], 'h')),
+      field('Mép mờ', pct(z[id], 'feather', 45)))),
+    h('div.btn-row', null, h('button.btn', { type: 'button', onclick: show }, 'Hiện khung các vùng trên xem thử')));
+}
+
 function viewStage() {
   const sg = S.config.stage;
   const scenes = obsScenes();
@@ -630,6 +651,7 @@ function viewStage() {
         sceneField('cam1', 'Camera 1 (cảnh OBS)'), sceneField('cam2', 'Camera 2 (cảnh OBS)'),
         field('Tự đổi sau mỗi (nhịp)', numInput(sg, 'beatSwitch', { min: 0, max: 64 }), 'Đặt 0 để không tự đổi. Cần đang nghe nhạc.')),
       h('div.btn-row', null, [1, 2].map((i) => h('button.btn' + (S.stageState.cam === i ? '.primary' : ''), { type: 'button', disabled: !both, onclick: () => stageDo({ action: 'cam', cam: i }) }, `Camera ${i}`)))),
+    zoneCard(),
     h('div.rules', null, sg.shows.length ? sg.shows.map(showBlock) : h('p.empty', null, 'Chưa có bài diễn nào. Một bài diễn gồm một bài nhạc và các mốc: giây nào phát clip gì, zoom thế nào, đổi sang góc máy nào.')));
 }
 

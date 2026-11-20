@@ -112,6 +112,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       game: store.config.game,
       scenery: store.config.scenery,
       auction: store.config.auction,
+      zones: store.config.stage.zones,
       bgm: store.config.bgm,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
@@ -173,7 +174,10 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     // Mốc của bài diễn phát ngay, không xếp hàng: phải rơi đúng giây đã đặt.
     fireCue: (cue) => {
       if (cue.camera !== 'none') camera.move(cue.camera, { duration: 2 });
-      if (cue.effect !== 'none' || cue.media) broadcast('overlay', { type: 'fx', effect: cue.effect, intensity: 3, duration: 5, sound: 'none', media: cue.media, mediaFit: 'cover', mediaKey: cue.mediaKey, alert: '' });
+      if (cue.effect !== 'none' || cue.media) {
+        broadcast('overlay', { type: 'fx', effect: cue.effect, intensity: 3, duration: 5, sound: 'none', alert: '', mediaFit: 'cover', mediaKey: cue.mediaKey,
+          media: cue.zone ? '' : cue.media, zone: cue.zone, zoneMedia: cue.zone ? cue.media : '', zoneLoop: cue.hold });
+      }
     },
     switchCam: (i) => { camera.scene(store.config.stage[`cam${i}`], 0); },
   });
@@ -574,6 +578,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
     if (route === 'POST /api/stage') {
       const body = await readJson(req);
+      if (body.action === 'zones') { broadcast('overlay', { type: 'zonepreview', cam: Number(body.cam) === 2 ? 2 : 1 }); return sendJson(res, 200, { ok: true }); }
       if (body.action === 'start') { if (!stage.start(String(body.id || ''))) return sendJson(res, 404, { error: 'Không tìm thấy bài diễn' }); }
       else if (body.action === 'stop') stage.stop();
       else if (body.action === 'cam') stage.setCam(Number(body.cam));
