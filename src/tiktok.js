@@ -15,6 +15,9 @@ export function normalizeUser(u = {}) {
     user: first(u.uniqueId, u.displayId, u.userId, u.id) || '',
     nickname: first(u.nickname, u.uniqueId, u.displayId) || '',
     avatar: first(img(u.avatarThumb), img(u.profilePicture), img(u.avatarMedium)) || '',
+    // Cấp tặng quà của người xem và cấp trong đội fan của kênh (dùng để chào khách theo bậc).
+    level: Number(first(u.payGrade?.level, u.gifterLevel, 0)) || 0,
+    fanLevel: Number(first(u.fansClub?.data?.level, u.fansClubInfo?.fansLevel, 0)) || 0,
   };
 }
 

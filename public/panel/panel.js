@@ -25,6 +25,7 @@ function h(spec, props, ...kids) {
 
 const S = {
   config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
+  fans: { size: 0, top: [] }, openTier: null,
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -482,6 +483,54 @@ function viewRules() {
     h('div.rules', null, S.config.rules.length ? S.config.rules.map(row) : h('p.empty', null, 'Chưa có kịch bản nào. Bấm “Thêm kịch bản” để tạo cái đầu tiên.')));
 }
 
+// --- Mục: Chào khách --------------------------------------------------------
+function tierBlock(tier) {
+  const g = S.config.greet.tiers[tier.id];
+  const open = S.openTier === tier.id;
+  const ext = (m) => m.split('.').pop().toLowerCase();
+  const visuals = S.media.filter((m) => !S.catalog.mediaExt.audio.includes(ext(m)));
+  const summary = [
+    tier.param ? `${tier.param.toLowerCase()} ${g.min}` : tier.id === 'special' ? `${g.users.split(/[\s,;]+/).filter(Boolean).length} người` : null,
+    g.videos.length ? `${g.videos.length} video` : 'chỉ lời chào',
+  ].filter(Boolean).join(' · ');
+  const editor = () => h('div.rule-edit', null,
+    h('p.small.muted', null, tier.help),
+    tier.id === 'special' ? field('ID TikTok của khách đặc biệt', textInput(g, 'users', { placeholder: 'anhca0811, chi_ba, …' }), 'Cách nhau bằng dấu phẩy hoặc dấu cách.') : null,
+    h('div.grid2', null,
+      tier.param ? field(tier.param, numInput(g, 'min', { min: 1, max: 10000 })) : null,
+      field('Lời chào', textInput(g, 'text', { placeholder: 'Chào mừng {user}!' }), 'Chèn được {user}. Bỏ trống nếu chỉ muốn phát video.')),
+    h('div.field', null, h('span', null, 'Video vào phòng (chọn nhiều thì phát ngẫu nhiên, không lặp liền nhau)'),
+      visuals.length ? h('div.checks', null, visuals.map((m) => h('label.check', null,
+        h('input', { type: 'checkbox', checked: g.videos.includes(m), onchange: (e) => {
+          g.videos = e.target.checked ? [...g.videos, m] : g.videos.filter((v) => v !== m);
+          save();
+        } }), h('span', null, m))))
+        : h('p.small.muted', null, 'Chưa có video nào trong thư viện. Thêm ở mục Hiển thị → Thư viện.')),
+    g.videos.length ? field('Xoá nền video', select(g, 'key', [['none', 'Không'], ['black', 'Xoá nền đen'], ['green', 'Xoá nền xanh lá']])) : null);
+  return h(`div.rule${g.enabled ? '' : '.off'}`, { 'data-tier': tier.id },
+    h('div.rule-row', null,
+      toggle(g, 'enabled', null, render),
+      h('div.rule-text', null, h('b', null, tier.name), h('span', null, summary)),
+      h('div.rule-actions', null,
+        h('button.btn.icon', { type: 'button', title: 'Chào thử', 'aria-label': `Chào thử ${tier.name}`, onclick: () => act('/api/greet/test', { tier: tier.id }) }, icon('play')),
+        h('button.btn', { type: 'button', 'aria-expanded': String(open), onclick: () => { S.openTier = open ? null : tier.id; render(); } }, open ? 'Xong' : 'Sửa'))),
+    open ? editor() : null);
+}
+
+function viewGreet() {
+  const g = S.config.greet;
+  return h('div.view', null,
+    head('Chào khách vào phòng', 'Khách quý vào phòng là có lời chào và video riêng theo bậc của họ.'),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Chào khách'), toggle(g, 'enabled', g.enabled ? 'Đang bật' : 'Đang tắt', render)),
+      h('p.muted', null, 'Mỗi người được xếp vào một bậc duy nhất, bậc nằm trên được ưu tiên. Lời chào đi vào hàng đợi với ưu tiên cao nhất.'),
+      toggle(g, 'once', 'Mỗi người chỉ chào một lần trong một buổi live'),
+      h('p.small.muted', null, S.fans.size
+        ? `Sổ fan đang nhớ ${nf.format(S.fans.size)} khán giả.${S.fans.top.length ? ` Tặng nhiều nhất: ${S.fans.top.slice(0, 3).map((f) => `${f.name} (${nf.format(f.coins)} xu)`).join(', ')}.` : ''}`
+        : 'Sổ fan còn trống. Nó tự ghi lại khán giả vào phòng và số xu họ tặng qua từng buổi live.')),
+    h('div.rules', null, S.catalog.greetTiers.map(tierBlock)));
+}
+
 // --- Mục: Quà tặng ----------------------------------------------------------
 const ruleForGift = (gift) => S.config.rules.find((r) => r.trigger.type === 'gift'
   && (r.trigger.giftId ? r.trigger.giftId === gift.id : r.trigger.giftName && r.trigger.giftName.toLowerCase() === gift.name.toLowerCase()));
@@ -872,7 +921,7 @@ function logRow(e) {
     gift: `tặng ${e.count || 1} ${e.giftName || 'quà'}${e.coins ? ` (${e.coins} xu)` : ''}`,
     like: `thả ${e.likeCount || 1} tim`,
     chat: e.text,
-    follow: 'đã follow', share: 'đã chia sẻ', join: 'vào phòng', jar: 'góp món cuối, hũ đã đầy',
+    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy',
   }[e.type] || '';
   const ran = (e.fired || []).map((id) => S.config.rules.find((r) => r.id === id)?.name).filter(Boolean);
   return h('div.log-row', null,
@@ -895,6 +944,7 @@ const VIEWS = [
   ['deck', 'Bảng hiệu ứng', 'deck', viewDeck],
   ['rules', 'Kịch bản', 'rules', viewRules],
   ['gifts', 'Quà tặng', 'giftrain', viewGifts],
+  ['greet', 'Chào khách', 'greet', viewGreet],
   ['music', 'Nhạc và nhịp', 'music', viewMusic],
   ['captions', 'Phụ đề', 'caption', viewCaptions],
   ['phone', 'Điện thoại', 'phone', viewPhone],

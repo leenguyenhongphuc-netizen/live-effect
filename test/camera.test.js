@@ -264,3 +264,61 @@ test('hàng đợi: video phát lần lượt theo ưu tiên, hiệu ứng nhẹ
   q.clear();
   assert.deepEqual(q.state(), { paused: false, current: null, waiting: [] });
 });
+
+test('sổ fan và chào khách theo bậc', async () => {
+  const { FanBook } = await import('../src/fans.js');
+  const { Greeter } = await import('../src/greet.js');
+  const { defaultConfig, sanitizeConfig } = await import('../src/defaults.js');
+  const { normalizeUser } = await import('../src/tiktok.js');
+  const file = path.join(os.tmpdir(), `fans-${process.pid}-${Date.now()}.json`);
+  let now = Date.UTC(2026, 0, 1, 12);
+  const DAY = 86400000;
+  const fans = new FanBook(file, () => now);
+
+  // Mỗi ngày chỉ tính một lần ghé; vắng lâu thì biết số ngày vắng.
+  assert.deepEqual(fans.seen('@An', 'An'), { visits: 1, daysAway: 0, firstTime: true });
+  assert.deepEqual(fans.seen('an', 'An'), { visits: 1, daysAway: 0, firstTime: false });
+  now += DAY;
+  assert.equal(fans.seen('AN', 'An').visits, 2);
+  fans.addCoins('binh', 'Bình', 500);
+  fans.addCoins('an', 'An', 100);
+  fans.addCoins('cuong', 'Cường', 50);
+  assert.deepEqual([fans.rank('binh'), fans.rank('@An'), fans.rank('cuong'), fans.rank('la')], [1, 2, 3, 0]);
+  fans.save();
+  assert.equal(new FanBook(file).rank('an'), 2);
+
+  const cfg = sanitizeConfig({ ...defaultConfig(), greet: { enabled: true, once: true, tiers: {
+    special: { enabled: true, users: '@VipA, vipb', videos: ['a.webm', 'b.webm', '../x.mp3', 'c.webm'], key: 'black', text: 'Chào {user} ({tier})' },
+    level: { enabled: true, min: 38 }, back: { enabled: true, min: 30 }, regular: { enabled: true, min: 3 },
+  } } });
+  assert.deepEqual(cfg.greet.tiers.special.videos, ['a.webm', 'b.webm', 'c.webm']); // tệp âm thanh và đường dẫn lạ bị loại
+  const sent = [];
+  const g = new Greeter({ getConfig: () => cfg, fans, fire: (m) => sent.push(m) });
+
+  // Mỗi người vào một bậc, bậc đứng trước được ưu tiên: vipa vừa là khách đặc biệt vừa cấp cao.
+  assert.equal(g.handleJoin({ user: 'VipA', nickname: 'Vip A', level: 50 }), 'Khách đặc biệt');
+  assert.equal(sent[0].alert, 'Chào Vip A (Khách đặc biệt)');
+  assert.deepEqual([sent[0].priority, sent[0].mediaKey, sent[0].mediaFit], [1, 'black', 'cover']);
+  assert.equal(g.handleJoin({ user: 'vipa', nickname: 'Vip A' }), null); // một lần mỗi buổi
+  assert.equal(g.handleJoin({ user: 'binh', nickname: 'Bình' }), 'Top 1 tặng quà');
+  assert.equal(g.handleJoin({ user: 'an', nickname: 'An' }), 'Top 2–3 tặng quà');
+  assert.equal(g.handleJoin({ user: 'daigia', nickname: 'Đại gia', level: 40 }), 'Đại gia TikTok');
+  assert.equal(g.handleJoin({ user: 'thuong', nickname: 'Thường', level: 5 }), null);
+  // Khách quen: ghé đủ số ngày. Lâu rồi mới gặp: vắng đủ số ngày.
+  for (let i = 0; i < 3; i++) { now += DAY; fans.seen('quen', 'Quen'); }
+  g.resetSession();
+  assert.equal(g.handleJoin({ user: 'quen', nickname: 'Quen' }), 'Khách quen');
+  now += 40 * DAY;
+  g.resetSession();
+  assert.equal(g.handleJoin({ user: 'thuong', nickname: 'Thường' }), 'Lâu rồi mới gặp');
+  // Nhiều video: không phát lặp cùng một video hai lần liền.
+  const tier = { id: 'special', name: 'Khách đặc biệt' };
+  const picks = [];
+  for (let i = 0; i < 30; i++) { g.greet(tier, { user: 'x' }); picks.push(sent.at(-1).media); }
+  assert.ok(picks.every((v, i) => i === 0 || v !== picks[i - 1]));
+  assert.equal(new Set(picks).size, 3);
+  cfg.greet.enabled = false;
+  assert.equal(g.handleJoin({ user: 'vipb' }), null);
+  // Cấp người xem và cấp đội fan được đọc từ dữ liệu TikTok.
+  assert.deepEqual([normalizeUser({ uniqueId: 'a', payGrade: { level: 42 }, fansClub: { data: { level: 17 } } })].map((u) => [u.level, u.fanLevel]), [[42, 17]]);
+});

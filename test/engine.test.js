@@ -125,7 +125,7 @@ test('quà theo chuỗi chỉ tính khi chuỗi kết thúc', () => {
   const streak = { giftId: '5655', repeatCount: 7, user: { displayId: 'an', nickname: 'An', avatarThumb: { urlList: ['https://x/a.jpg'] } }, gift: { name: 'Rose', type: 1, diamondCount: 1, image: { urlList: ['https://x/rose.png'] } } };
   assert.equal(normalizeGift({ ...streak, repeatEnd: 0 }), null);
   assert.deepEqual(normalizeGift({ ...streak, repeatEnd: 1 }), {
-    type: 'gift', user: 'an', nickname: 'An', avatar: 'https://x/a.jpg', giftId: '5655', giftName: 'Rose', giftImage: 'https://x/rose.png', count: 7, coins: 7,
+    type: 'gift', user: 'an', nickname: 'An', avatar: 'https://x/a.jpg', level: 0, fanLevel: 0, giftId: '5655', giftName: 'Rose', giftImage: 'https://x/rose.png', count: 7, coins: 7,
   });
   // Dạng trường của phiên bản giao thức cũ.
   const old = normalizeGift({ repeatCount: 1, user: { uniqueId: 'b' }, giftDetails: { giftName: 'Lion', giftType: 2, diamondCount: 29999, giftImage: { giftPictureUrl: 'https://x/l.png' } } });

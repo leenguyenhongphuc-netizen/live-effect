@@ -70,6 +70,17 @@ const donateRule = () => rule('r-donate', 'Cảm ơn ủng hộ', { type: 'donat
 
 export const CONFIG_VERSION = 2;
 
+const GREET_TIERS = { special: 0, top1: 0, top3: 0, top10: 0, level: 30, fan: 10, back: 30, regular: 5 };
+const GREET_TEXT = {
+  special: 'Chào mừng {user} đã tới!', top1: 'Top 1 {user} vừa vào phòng!', top3: 'Chào đại gia {user}!', top10: 'Chào {user}, cảm ơn đã luôn ủng hộ!',
+  level: 'Chào đại gia {user}!', fan: 'Đội fan {user} đã có mặt!', back: 'Lâu lắm mới gặp lại {user}!', regular: 'Chào khách quen {user}!',
+};
+function defaultGreetTiers() {
+  return Object.fromEntries(Object.entries(GREET_TIERS).map(([id, min]) => [id, {
+    enabled: ['special', 'top1', 'top3'].includes(id), min, users: '', videos: [], key: 'none', text: GREET_TEXT[id],
+  }]));
+}
+
 export function defaultConfig() {
   return {
     version: CONFIG_VERSION,
@@ -89,6 +100,7 @@ export function defaultConfig() {
     gifts: { celebrate: true },
     captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
     jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
+    greet: { enabled: false, once: true, tiers: defaultGreetTiers() },
     camera: { enabled: false, source: '', beat: 'off', amount: 2 },
     music: {
       enabled: false, source: 'system', deviceId: '', sensitivity: 1, palette: 'storm',
@@ -211,6 +223,21 @@ export function sanitizeConfig(input) {
   const cp = c.captions && typeof c.captions === 'object' ? c.captions : {};
   const cm = c.camera && typeof c.camera === 'object' ? c.camera : {};
   const jr = c.jar && typeof c.jar === 'object' ? c.jar : {};
+  const gr = c.greet && typeof c.greet === 'object' ? c.greet : {};
+  const grT = gr.tiers && typeof gr.tiers === 'object' ? gr.tiers : {};
+  const greetTiers = Object.fromEntries(Object.entries(defaultGreetTiers()).map(([id, def]) => {
+    const t = grT[id] && typeof grT[id] === 'object' ? grT[id] : {};
+    const videos = (Array.isArray(t.videos) ? t.videos : []).slice(0, 30)
+      .map((v) => safeMediaName(v)).filter((m) => m && m.kind !== 'audio').map((m) => m.name);
+    return [id, {
+      enabled: bool(t.enabled, def.enabled),
+      min: Math.round(num(t.min, 1, 10000, def.min || 1)),
+      users: str(t.users, 800),
+      videos: [...new Set(videos)],
+      key: oneOf(t.key, ['none', 'black', 'green'], 'none'),
+      text: str(t.text, 100),
+    }];
+  }));
   const mu = c.music && typeof c.music === 'object' ? c.music : {};
   const ly = mu.layers && typeof mu.layers === 'object' ? mu.layers : {};
   const al = w.alerts || {};
@@ -298,6 +325,7 @@ export function sanitizeConfig(input) {
       token: /^[0-9a-f]{32}$/.test(rm.token) ? rm.token : '',
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
+    greet: { enabled: bool(gr.enabled, false), once: bool(gr.once, true), tiers: greetTiers },
     jar: {
       enabled: bool(jr.enabled, false),
       title: str(jr.title, 30) || 'Hũ quà',

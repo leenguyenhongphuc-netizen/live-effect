@@ -11,6 +11,8 @@ import { GiftCatalog } from './gifts.js';
 import { ObsCamera } from './obscam.js';
 import { Jar } from './jar.js';
 import { EffectQueue } from './queue.js';
+import { FanBook } from './fans.js';
+import { Greeter, TIERS } from './greet.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -138,6 +140,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     },
     onChange: () => { broadcast('panel', { type: 'queue', queue: queue.state() }); },
   });
+  const fans = new FanBook(path.join(dataDir, 'fans.json'));
+  const greeter = new Greeter({ getConfig: () => store.config, fans, fire: (msg) => queue.push(msg) });
   // Mọi hiệu ứng đi qua hàng đợi: video toàn màn hình phát lần lượt theo ưu tiên, còn lại chạy ngay.
   const engine = new Engine(() => store.config, (msg) => {
     if (msg.type === 'fx') queue.push(msg); else broadcast('overlay', msg);
@@ -159,6 +163,10 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (ev.type === 'gift' && ev.giftId && !ev.simulated) {
       mergeGifts([{ id: ev.giftId, name: ev.giftName, coins: Math.round((ev.coins || 0) / (ev.count || 1)), image: ev.giftImage }]);
     }
+    // Sổ fan và chào khách: ghi nhận người vào phòng, chào theo bậc; cộng xu cho người tặng quà.
+    if (ev.type === 'gift' && !ev.simulated) fans.addCoins(ev.user, ev.nickname, ev.coins);
+    const greeted = ev.type === 'join' ? greeter.handleJoin(ev) : null;
+    if (greeted) record({ ...ev, greeted }, []);
     const fired = engine.handle(ev);
     // Hũ quà: quà nào cũng rơi vào hũ (kể cả khi đang tắt chúc mừng); đầy thì vỡ và chạy kịch bản "Hũ quà đầy".
     if (ev.type === 'gift') {
@@ -173,7 +181,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       }
     }
     // Người vào xem xuất hiện dồn dập; chỉ ghi nhật ký khi có kịch bản chạy.
-    if (ev.type !== 'join' || fired.length) record(ev, fired);
+    if (ev.type !== 'join' || (fired.length && !greeted)) record(ev, fired);
     const tts = store.config.tts;
     if (tts.enabled) {
       const who = ev.nickname || ev.user || 'bạn';
@@ -188,7 +196,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
   tiktok.on('event', ingest);
   tiktok.on('status', (s) => {
-    if (s.state === 'connected' && tiktok.lastState !== 'connected') { engine.resetSession(); jar.reset(); broadcast('overlay', jar.state()); }
+    if (s.state === 'connected' && tiktok.lastState !== 'connected') { engine.resetSession(); greeter.resetSession(); jar.reset(); broadcast('overlay', jar.state()); }
     tiktok.lastState = s.state;
     broadcast('panel', statusMsg());
   });
@@ -318,7 +326,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     media: store.listMedia(),
     gifts: catalog.list(),
     queue: queue.state(),
-    catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS },
+    fans: { size: fans.size, top: fans.top(10) },
+    catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS, greetTiers: TIERS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
     hookUrl: hookUrl(),
     capabilities: { hotkeys },
@@ -452,6 +461,14 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       const body = await readJson(req);
       const ok = camera.move(String(body.move || ''), { duration: 2.5 });
       return sendJson(res, 200, { ok, camera: camera.status });
+    }
+
+    if (route === 'POST /api/greet/test') {
+      const body = await readJson(req);
+      const tier = TIERS.find((t) => t.id === body.tier);
+      if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
+      greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
+      return sendJson(res, 200, { ok: true, overlays: overlayCount() });
     }
 
     if (route === 'POST /api/queue') {
@@ -669,6 +686,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       twitch.disconnect();
       await remote.close();
       await camera.close();
+      fans.save();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();
       await new Promise((r) => server.close(r));

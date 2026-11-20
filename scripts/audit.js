@@ -47,7 +47,7 @@ async function checkLayout(page, name) {
   note(r.small.length === 0, `${name}: vùng bấm đủ lớn${r.small.length ? ` → ${r.small.join(' | ')}` : ''}`);
 }
 
-const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
+const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Chào khách', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
 
 try {
   // ----- Máy tính ---------------------------------------------------------
@@ -218,6 +218,29 @@ try {
   note(await frame().evaluate(() => window.__overlay.jar.bodies.length === 0 && window.__overlay.jar.state.coins === 0), 'Hũ quà: sau khi vỡ thì rỗng và đếm lại từ 0');
   await desk.click('#clear-all');
   await desk.locator('.card:has-text("Hũ quà") .switch').first().click();
+  await sleep(500);
+
+  // Chào khách: bật, gán video cho khách đặc biệt, người đó vào phòng thì được chào đúng bậc.
+  await desk.click('#clear-all');
+  await desk.click('#nav >> text=Chào khách');
+  await desk.click('.card-head .switch');
+  await sleep(500);
+  await desk.click('[data-tier="special"] >> text=Sửa');
+  await desk.fill('[data-tier="special"] input[placeholder^="anhca0811"]', 'anhca0811');
+  await desk.locator('[data-tier="special"] .check input').first().check();
+  await sleep(700);
+  await desk.screenshot({ path: path.join(shots, '22-chao-khach.png') });
+  await checkLayout(desk, 'Chào khách');
+  app.ingest({ type: 'join', user: 'nguoi_la', nickname: 'Người lạ' });
+  app.ingest({ type: 'join', user: 'AnhCa0811', nickname: 'Anh Cả' });
+  await sleep(900);
+  note((await frame().locator('.alert').textContent()).includes('Anh Cả'), 'Chào khách: khách đặc biệt vào phòng thì hiện lời chào có tên');
+  note(await frame().locator('#media > *').count() === 1, 'Chào khách: phát video vào phòng của bậc đó');
+  app.ingest({ type: 'join', user: 'anhca0811', nickname: 'Anh Cả' });
+  await sleep(300);
+  note(app.config.greet.enabled && (await desk.evaluate(() => fetch('/api/state').then((r) => r.json()).then((s) => s.queue.waiting.length))) === 0, 'Chào khách: vào lại trong cùng buổi thì không chào lặp');
+  await desk.click('#clear-all');
+  await desk.click('.card-head .switch');
   await sleep(500);
 
   // Phụ đề: bật, gửi câu mẫu, rồi đi qua trang phụ đề bằng ô "Gõ thử".
