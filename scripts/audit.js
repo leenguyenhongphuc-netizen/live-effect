@@ -410,6 +410,44 @@ try {
   }
   await narrow.screenshot({ path: path.join(shots, '13-hep.png') });
 
+  // ----- Nhạc nền và cảnh vật: thử trên một overlay thật (không phải khung xem thử, vốn tắt tiếng) -----
+  for (const [name, hz] of [['bai mot.wav', 330], ['bai hai.wav', 550]]) {
+    const f = path.join(dataDir, name);
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', `sine=frequency=${hz}:duration=20`, f]);
+    await fetch(`http://127.0.0.1:${app.port}/api/media?name=${encodeURIComponent(name)}`, { method: 'POST', body: fs.readFileSync(f) });
+  }
+  const putCfg = (patch) => fetch(`http://127.0.0.1:${app.port}/api/config`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...app.config, ...patch }) });
+  await putCfg({
+    bgm: { ...app.config.bgm, enabled: true, tracks: ['bai mot.wav', 'bai hai.wav'], volume: 0.4, duck: 'lower' },
+    scenery: { enabled: true, media: 'rong lua.webm', key: 'black', opacity: 0.8 },
+  });
+  const live = await browser.newPage({ viewport: { width: 540, height: 960 } });
+  watch(live, 'overlay thật');
+  await live.goto(app.overlayUrl);
+  await live.waitForFunction(() => window.__overlay && !window.__overlay.bgm.audio.paused, null, { timeout: 8000 }).catch(() => {});
+  const b1 = await live.evaluate(() => { const b = window.__overlay.bgm; return { playing: !b.audio.paused, src: decodeURIComponent(b.audio.src), vol: b.audio.volume, card: document.querySelector('#xbgm b')?.textContent, scenery: document.querySelector('#scenery canvas') !== null, op: document.getElementById('scenery').style.opacity }; });
+  note(b1.playing && b1.src.endsWith('bai mot.wav') && Math.abs(b1.vol - 0.4) < 0.01, `Nhạc nền: tự phát bài đầu ở đúng âm lượng (${b1.vol})`);
+  note(b1.card === 'bai mot', `Nhạc nền: thẻ đang phát hiện tên bài (“${b1.card}”)`);
+  note(b1.scenery && b1.op === '0.8', 'Cảnh vật: video lặp được xoá nền và đặt đúng độ rõ');
+  const videoRule = app.config.rules.find((r) => r.action.media === 'rong lua.webm');
+  await fetch(`http://127.0.0.1:${app.port}/api/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ruleId: videoRule.id }) });
+  await sleep(900);
+  const ducked = await live.evaluate(() => window.__overlay.bgm.audio.volume);
+  note(Math.abs(ducked - 0.1) < 0.01, `Nhạc nền: nhỏ tiếng lại khi video hiệu ứng đang phát (${ducked})`);
+  await live.waitForFunction(() => Math.abs(window.__overlay.bgm.audio.volume - 0.4) < 0.01, null, { timeout: 8000 }).catch(() => {});
+  note(Math.abs((await live.evaluate(() => window.__overlay.bgm.audio.volume)) - 0.4) < 0.01, 'Nhạc nền: video xong thì âm lượng trở lại');
+  app.ingest({ type: 'chat', user: 'an', nickname: 'An', text: '!nhac 2' });
+  await sleep(600);
+  note((await live.evaluate(() => decodeURIComponent(window.__overlay.bgm.audio.src))).endsWith('bai hai.wav'), 'Nhạc nền: khán giả gõ “!nhac 2” thì chuyển sang bài 2');
+  await fetch(`http://127.0.0.1:${app.port}/api/bgm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd: 'pause' }) });
+  await sleep(400);
+  note(await live.evaluate(() => window.__overlay.bgm.audio.paused), 'Nhạc nền: nút tạm dừng nhạc có tác dụng');
+  await live.screenshot({ path: path.join(shots, '25-nhac-nen.png') });
+  await putCfg({ bgm: { ...app.config.bgm, enabled: false }, scenery: { ...app.config.scenery, enabled: false } });
+  await sleep(500);
+  note(await live.evaluate(() => window.__overlay.bgm.audio.paused && document.getElementById('scenery').children.length === 0 && document.getElementById('xbgm').hidden), 'Tắt nhạc nền và cảnh vật thì cả hai dừng hẳn');
+  await live.close();
+
   // ----- Overlay ở kích thước phát sóng thật --------------------------------
   for (const [w, hgt, name] of [[1080, 1920, 'doc'], [1920, 1080, 'ngang']]) {
     const ov = await browser.newPage({ viewport: { width: w, height: hgt } });

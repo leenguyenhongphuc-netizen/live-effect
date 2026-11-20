@@ -207,3 +207,17 @@ html, body {
 #media > .top { top: 0; }
 #media > .bottom { bottom: 0; }
 #xqueue { width: calc(var(--u) * 27); }
+
+/* Cảnh vật trước ống kính: lớp hình lặp phủ kín khung, nằm dưới mọi hiệu ứng khác */
+#scenery { position: fixed; inset: 0; pointer-events: none; }
+#scenery > * { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Thẻ nhạc đang phát */
+#xbgm .np { display: flex; align-items: center; gap: calc(var(--u) * 1); }
+#xbgm .disc { flex: none; width: calc(var(--u) * 4.4); height: calc(var(--u) * 4.4); border-radius: 50%;
+  background: radial-gradient(circle, var(--accent) 0 18%, #14121a 19% 26%, #2c2a31 27% 100%); animation: disc-spin 3.2s linear infinite; }
+#xbgm .disc.still { animation-play-state: paused; }
+#xbgm .who { display: flex; flex-direction: column; min-width: 0; }
+#xbgm .who .xt { margin: 0; font-size: calc(var(--u) * 1.3); }
+#xbgm .who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes disc-spin { to { transform: rotate(360deg); } }

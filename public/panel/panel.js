@@ -893,6 +893,46 @@ async function timerDo(action, seconds) {
   try { S.timer = (await api('POST', '/api/timer', { action, seconds })).timer; render(); } catch (err) { toast(err.message); }
 }
 
+function layerCards() {
+  const sc = S.config.scenery;
+  const b = S.config.bgm;
+  const ext = (m) => m.split('.').pop().toLowerCase();
+  const audio = S.media.filter((m) => S.catalog.mediaExt.audio.includes(ext(m)));
+  const visuals = S.media.filter((m) => !S.catalog.mediaExt.audio.includes(ext(m)));
+  const bgmDo = (cmd, index) => act('/api/bgm', { cmd, index });
+  return [
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Cảnh vật trước ống kính'), toggle(sc, 'enabled', null, render)),
+      h('p.small.muted', null, 'Một video hoặc hình lặp vô tận phủ lên hình live: lá rơi, tuyết, khung viền… Lớp này không phát tiếng.'),
+      sc.enabled ? h('div.grid3', null,
+        field('Video hoặc hình', select(sc, 'media', [['', 'Chưa chọn'], ...visuals.map((m) => [m, m])]), visuals.length ? null : 'Thêm tệp ở thẻ Thư viện phía trên.'),
+        field('Xoá nền', select(sc, 'key', [['none', 'Không'], ['black', 'Xoá nền đen'], ['green', 'Xoá nền xanh lá']])),
+        field('Độ rõ (0,1 đến 1)', numInput(sc, 'opacity', { min: 0.1, max: 1, step: 0.1 }))) : null),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Nhạc nền'), toggle(b, 'enabled', null, render)),
+      h('p.small.muted', null, 'Phát lần lượt các bài bạn chọn, qua nguồn overlay trong OBS. Khi có video hiệu ứng, nhạc tự nhỏ lại hoặc tạm dừng.'),
+      b.enabled ? [
+        h('div.field', null, h('span', null, 'Danh sách bài (số thứ tự dùng cho lệnh chọn bài)'),
+          audio.length ? h('div.checks', null, audio.map((m) => h('label.check', null,
+            h('input', { type: 'checkbox', checked: b.tracks.includes(m), onchange: (e) => {
+              b.tracks = e.target.checked ? [...b.tracks, m] : b.tracks.filter((x) => x !== m);
+              save(); render();
+            } }), h('span', null, b.tracks.includes(m) ? `${b.tracks.indexOf(m) + 1}. ${m}` : m))))
+            : h('p.small.muted', null, 'Chưa có tệp âm thanh nào. Thêm tệp mp3, wav hoặc ogg ở thẻ Thư viện phía trên.')),
+        h('div.grid3', null,
+          field('Âm lượng (0 đến 1)', numInput(b, 'volume', { min: 0, max: 1, step: 0.05 })),
+          field('Khi có video hiệu ứng', select(b, 'duck', [['lower', 'Nhỏ tiếng lại'], ['pause', 'Tạm dừng'], ['none', 'Vẫn phát bình thường']])),
+          field('Vị trí thẻ đang phát', select(b, 'position', CORNERS))),
+        h('div.btn-row', null, toggle(b, 'showCard', 'Hiện thẻ đang phát'), toggle(b, 'shuffle', 'Phát ngẫu nhiên'), toggle(b, 'requests', 'Cho khán giả chọn bài')),
+        b.requests ? h('p.small.muted', null, 'Khán giả gõ “!nhac” kèm số bài (ví dụ “!nhac 2”) để chuyển sang bài đó. Mỗi 20 giây nhận một lượt chọn.') : null,
+        h('div.btn-row', null,
+          h('button.btn', { type: 'button', disabled: !b.tracks.length, onclick: () => bgmDo('play') }, 'Phát'),
+          h('button.btn', { type: 'button', disabled: !b.tracks.length, onclick: () => bgmDo('pause') }, 'Tạm dừng nhạc'),
+          h('button.btn', { type: 'button', disabled: b.tracks.length < 2, onclick: () => bgmDo('next') }, 'Bài kế')),
+      ] : null),
+  ];
+}
+
 function extrasCards() {
   const x = S.config.extras;
   const t = S.timer;
@@ -997,6 +1037,7 @@ function viewDisplay() {
         field('Tiêu đề', textInput(w.top, 'title')),
         field('Số người hiện', numInput(w.top, 'max', { min: 1, max: 10 })),
         field('Vị trí', select(w.top, 'position', [['top-left', 'Trên, bên trái'], ['top-right', 'Trên, bên phải'], ['bottom-left', 'Dưới, bên trái'], ['bottom-right', 'Dưới, bên phải']])))),
+    layerCards(),
     extrasCards(),
     h('section.card', null,
       h('div.card-head', null, h('h2', null, 'Giọng đọc tự động'), toggle(tts, 'enabled')),

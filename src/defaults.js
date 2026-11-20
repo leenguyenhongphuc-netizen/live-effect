@@ -109,6 +109,8 @@ export function defaultConfig() {
     jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
     greet: { enabled: false, once: true, tiers: defaultGreetTiers() },
     webhook: { enabled: false, url: '', events: ['gift', 'follow', 'share', 'donate'] },
+    scenery: { enabled: false, media: '', key: 'none', opacity: 1 },
+    bgm: { enabled: false, tracks: [], volume: 0.5, duck: 'lower', shuffle: false, showCard: true, requests: true, position: 'top-left' },
     game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
@@ -345,6 +347,30 @@ export function sanitizeConfig(input) {
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
     greet: { enabled: bool(gr.enabled, false), once: bool(gr.once, true), tiers: greetTiers },
+    scenery: (() => {
+      const sc = c.scenery && typeof c.scenery === 'object' ? c.scenery : {};
+      const m = sc.media ? safeMediaName(sc.media) : null;
+      return {
+        enabled: bool(sc.enabled, false),
+        media: m && m.kind !== 'audio' ? m.name : '',
+        key: oneOf(sc.key, ['none', 'black', 'green'], 'none'),
+        opacity: num(sc.opacity, 0.1, 1, 1),
+      };
+    })(),
+    bgm: (() => {
+      const bm = c.bgm && typeof c.bgm === 'object' ? c.bgm : {};
+      const tracks = (Array.isArray(bm.tracks) ? bm.tracks : []).slice(0, 99).map((t) => safeMediaName(t)).filter((m) => m && m.kind === 'audio').map((m) => m.name);
+      return {
+        enabled: bool(bm.enabled, false),
+        tracks: [...new Set(tracks)],
+        volume: num(bm.volume, 0, 1, 0.5),
+        duck: oneOf(bm.duck, ['lower', 'pause', 'none'], 'lower'),
+        shuffle: bool(bm.shuffle, false),
+        showCard: bool(bm.showCard, true),
+        requests: bool(bm.requests, true),
+        position: oneOf(bm.position, ['top-left', 'top-right', 'bottom-left', 'bottom-right'], 'top-left'),
+      };
+    })(),
     webhook: (() => {
       const wh = c.webhook && typeof c.webhook === 'object' ? c.webhook : {};
       const known = ['gift', 'follow', 'share', 'like', 'chat', 'join', 'donate', 'jar', 'game', 'timer'];

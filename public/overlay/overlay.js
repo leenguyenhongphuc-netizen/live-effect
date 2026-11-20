@@ -5,13 +5,14 @@ import { Reactive } from '/overlay/react.js';
 import { JarView } from '/overlay/jar.js';
 import { Extras } from '/overlay/extras.js';
 import { GameView } from '/overlay/game.js';
+import { Scenery, Bgm } from '/overlay/bgm.js';
 
 // Tham số trên link:
 //   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
 //   ?layers=fx,alerts...  chỉ hiện một số lớp, dùng khi muốn tách thành nhiều nguồn trong OBS
 const params = new URLSearchParams(location.search);
 const preview = params.get('preview') === '1';
-const layers = new Set((params.get('layers') || 'game,extras,jar,caption,fx,alerts,media,chat,goal,top,qr').split(','));
+const layers = new Set((params.get('layers') || 'scenery,bgm,game,extras,jar,caption,fx,alerts,media,chat,goal,top,qr').split(','));
 const has = (name) => layers.has(name);
 
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,8 @@ const react = new Reactive($('react'));
 const jar = new JarView($('jar'));
 const extras = new Extras(document.body);
 const game = new GameView(document.body);
+const scenery = new Scenery(document.body);
+const bgm = new Bgm(document.body, preview);
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
 const nf = new Intl.NumberFormat('vi-VN');
 const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
@@ -103,6 +106,7 @@ function nextMedia() {
       if (isVideo) { source.pause(); source.removeAttribute('src'); source.load(); }
       node.remove();
       mediaBusy = false;
+      if (!mediaQueue.length) bgm.duck(false);
       nextMedia();
     }, 240);
   };
@@ -117,6 +121,7 @@ function nextMedia() {
     source.alt = '';
     setTimeout(finish, duration * 1000);
   }
+  if (isVideo) bgm.duck(true);
   source.src = src;
   els.media.replaceChildren(node);
   if (isVideo) source.play().catch(() => { source.muted = true; source.play().catch(finish); });
@@ -285,6 +290,8 @@ function onMessage(msg) {
       if (has('jar')) jar.setConfig(msg.jar);
       if (has('extras')) extras.setConfig(msg.extras);
       if (has('game')) game.setConfig(msg.game);
+      if (has('scenery')) scenery.setConfig(msg.scenery);
+      if (has('bgm')) bgm.setConfig(msg.bgm);
       break;
     case 'audio': if (has('fx')) react.onAudio(msg); break;
     case 'caption': showCaption(msg); break;
@@ -292,6 +299,7 @@ function onMessage(msg) {
       // Vừa có người mở trúng bẫy: thêm tiếng nổ và viền đỏ cho rõ khoảnh khắc.
       if (has('game') && game.setState(msg) && has('fx')) { playSound('boom', preview); flashBorder(1.6); }
       break;
+    case 'bgm': if (has('bgm')) bgm.cmd(msg); break;
     case 'queueboard': extras.onQueue(msg); break;
     case 'timer': extras.onTimer(msg); break;
     case 'toplikes': extras.onLikes(msg); break;
@@ -330,4 +338,4 @@ applyWidgets(widgets);
 connect();
 
 // Cho phép kiểm thử tự động đọc trạng thái.
-window.__overlay = { fx, react, jar, extras, game, onMessage };
+window.__overlay = { fx, react, jar, extras, game, scenery, bgm, onMessage };

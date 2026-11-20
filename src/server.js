@@ -76,6 +76,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
   tiktok.catalog = catalog;
   const jar = new Jar(() => store.config);
+  let lastSongRequest = 0;
   const webhook = new Webhook({ getConfig: () => store.config, fetchImpl: hookFetch, onStatus: () => broadcast('panel', statusMsg()) });
   const camera = new ObsCamera({ getConfig: () => store.config, port: obsPort, onStatus: () => broadcast('panel', statusMsg()) });
   const twitch = twitchInjected || new TwitchSource();
@@ -107,6 +108,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       jar: store.config.jar,
       extras: store.config.extras,
       game: store.config.game,
+      scenery: store.config.scenery,
+      bgm: store.config.bgm,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
   };
@@ -193,6 +196,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (ev.type === 'gift' && !ev.simulated) fans.addCoins(ev.user, ev.nickname, ev.coins);
     extras.onEvent(ev);
     if (ev.type === 'chat') game.handleChat(ev);
+    // Khán giả chọn bài: gõ "!nhac 3" để phát bài số 3 trong danh sách nhạc nền.
+    if (ev.type === 'chat' && store.config.bgm.enabled && store.config.bgm.requests) {
+      const m = /^\s*!nh[aạ]c\s+(\d{1,2})\s*$/i.exec(String(ev.text || ''));
+      const index = m ? Number(m[1]) - 1 : -1;
+      if (store.config.bgm.tracks[index] && Date.now() - lastSongRequest > 20000) {
+        lastSongRequest = Date.now();
+        broadcast('overlay', { type: 'bgm', cmd: 'play', index });
+      }
+    }
     const greeted = ev.type === 'join' ? greeter.handleJoin(ev) : null;
     if (greeted) record({ ...ev, greeted }, []);
     const fired = engine.handle(ev);
@@ -500,6 +512,14 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       const tier = TIERS.find((t) => t.id === body.tier);
       if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
       greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
+      return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/bgm') {
+      const body = await readJson(req);
+      if (!['next', 'pause', 'play'].includes(body.cmd)) return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      const index = Number.isInteger(body.index) && store.config.bgm.tracks[body.index] ? body.index : undefined;
+      broadcast('overlay', { type: 'bgm', cmd: body.cmd, index });
       return sendJson(res, 200, { ok: true, overlays: overlayCount() });
     }
 
