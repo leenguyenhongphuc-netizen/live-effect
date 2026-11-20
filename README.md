@@ -12,6 +12,7 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
   mở trong Chrome (nhận giọng nói và bộ dịch có sẵn của trình duyệt), không cần khoá API.
 - **Camera chuyển động (OBS)**: zoom vào, kéo ra, rung, nghiêng, xoay theo nút bấm, theo quà hoặc giật theo nhịp nhạc;
   xong mỗi lần camera trở về đúng chỗ cũ.
+- **Hũ quà**: quà rơi vào một chiếc hũ trên màn hình, xếp chồng lên nhau; đủ số xu thì hũ vỡ ra ăn mừng rồi bắt đầu lại.
 - **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.
   Chọn một video trong thư viện ảnh của điện thoại là có ngay nút mới kèm ảnh thu nhỏ.

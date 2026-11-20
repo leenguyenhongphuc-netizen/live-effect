@@ -191,6 +191,35 @@ try {
   await sleep(900);
   note(await frame().evaluate(() => !window.__overlay.react.running && window.__overlay.react.embers.length === 0), 'Nhạc và nhịp: tắt công tắc thì lớp hiệu ứng nhạc tắt hẳn');
 
+  // Hũ quà: bật, thả quà, các món phải nằm yên trong lòng hũ; đủ xu thì vỡ.
+  await desk.click('#clear-all');
+  await desk.click('#nav >> text=Quà tặng');
+  await desk.locator('.card:has-text("Hũ quà") .switch').first().click();
+  await desk.waitForSelector('text=Thả thử một quà');
+  await desk.locator('.card:has-text("Hũ quà") input[type=number]').fill('40');
+  await sleep(700);
+  for (let i = 0; i < 4; i++) { await desk.click('text=Thả thử một quà'); await sleep(250); }
+  await sleep(3500);
+  const jarState = await frame().evaluate(() => {
+    const j = window.__overlay.jar;
+    const b = j.box;
+    return { n: j.bodies.length, coins: j.state.coins, running: j.running,
+      inside: j.bodies.every((o) => o.x >= b.left - 1 && o.x <= b.right + 1 && o.y <= b.floor + 1 && o.y >= b.y - o.r) };
+  });
+  note(jarState.n === 20 && jarState.coins === 20, `Hũ quà: 4 lượt quà thành ${jarState.n} món, ${jarState.coins} xu`);
+  note(jarState.inside, 'Hũ quà: mọi món nằm trong lòng hũ, không lọt ra ngoài');
+  note(!jarState.running, 'Hũ quà: xếp xong thì ngừng vẽ, không tốn máy');
+  await desk.screenshot({ path: path.join(shots, '21-hu-qua.png') });
+  await checkLayout(desk, 'Quà tặng (có hũ)');
+  for (let i = 0; i < 4; i++) { await desk.click('text=Thả thử một quà'); await sleep(150); }
+  await sleep(600);
+  note((await particles()) > 20, 'Hũ quà: đủ xu thì vỡ và bắn pháo giấy');
+  await sleep(2400);
+  note(await frame().evaluate(() => window.__overlay.jar.bodies.length === 0 && window.__overlay.jar.state.coins === 0), 'Hũ quà: sau khi vỡ thì rỗng và đếm lại từ 0');
+  await desk.click('#clear-all');
+  await desk.locator('.card:has-text("Hũ quà") .switch').first().click();
+  await sleep(500);
+
   // Phụ đề: bật, gửi câu mẫu, rồi đi qua trang phụ đề bằng ô "Gõ thử".
   await desk.click('#nav >> text=Phụ đề');
   await desk.click('.card-head .switch');

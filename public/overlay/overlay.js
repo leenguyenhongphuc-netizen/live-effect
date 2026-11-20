@@ -2,18 +2,20 @@ import { Fx } from '/overlay/fx.js';
 import { playSound, stopSounds } from '/overlay/sound.js';
 import { keyedCanvas } from '/overlay/key.js';
 import { Reactive } from '/overlay/react.js';
+import { JarView } from '/overlay/jar.js';
 
 // Tham số trên link:
 //   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
 //   ?layers=fx,alerts...  chỉ hiện một số lớp, dùng khi muốn tách thành nhiều nguồn trong OBS
 const params = new URLSearchParams(location.search);
 const preview = params.get('preview') === '1';
-const layers = new Set((params.get('layers') || 'caption,fx,alerts,media,chat,goal,top,qr').split(','));
+const layers = new Set((params.get('layers') || 'jar,caption,fx,alerts,media,chat,goal,top,qr').split(','));
 const has = (name) => layers.has(name);
 
 const $ = (id) => document.getElementById(id);
 const fx = new Fx($('fx'));
 const react = new Reactive($('react'));
+const jar = new JarView($('jar'));
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
 const nf = new Intl.NumberFormat('vi-VN');
 const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
@@ -269,9 +271,18 @@ function onMessage(msg) {
       applyWidgets(msg.widgets);
       if (has('fx')) react.setConfig(msg.music);
       applyCaptions(msg.captions);
+      if (has('jar')) jar.setConfig(msg.jar);
       break;
     case 'audio': if (has('fx')) react.onAudio(msg); break;
     case 'caption': showCaption(msg); break;
+    case 'jar': if (has('jar')) jar.setState(msg); break;
+    case 'jardrop': if (has('jar')) jar.drop(msg); break;
+    case 'jarburst':
+      if (!has('jar')) break;
+      jar.burst(msg);
+      // Hũ đầy: tự ăn mừng bằng pháo giấy và kèn, không cần tạo kịch bản.
+      if (has('fx')) { fx.play('confetti', { intensity: 3, duration: 4 }); playSound('fanfare', preview); }
+      break;
     case 'chat': addChat(msg); break;
     case 'goal': setGoal(msg); break;
     case 'top': setTop(Array.isArray(msg.rows) ? msg.rows : []); break;
@@ -297,4 +308,4 @@ applyWidgets(widgets);
 connect();
 
 // Cho phép kiểm thử tự động đọc trạng thái.
-window.__overlay = { fx, react, onMessage };
+window.__overlay = { fx, react, jar, onMessage };

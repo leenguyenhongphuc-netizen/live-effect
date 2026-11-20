@@ -313,6 +313,7 @@ function describe(rule) {
     join: t.user ? `Khi @${t.user} vào phòng` : 'Khi có người vào xem',
     donate: `Khi có người ủng hộ${t.minAmount ? ` từ ${fmtVnd(t.minAmount)}` : ''}`,
     button: t.hotkey ? `Nút bấm tay · phím ${t.hotkey}` : 'Nút bấm tay trên điện thoại',
+    jar: 'Khi hũ quà đầy',
   }[t.type];
   const a = rule.action;
   const then = [
@@ -485,6 +486,24 @@ function giftRow(gift) {
         : h('button.btn', { type: 'button', onclick: () => giftRule(gift) }, 'Hiệu ứng riêng')));
 }
 
+function jarCard() {
+  const j = S.config.jar;
+  return h('section.card', null,
+    h('div.card-head', null, h('h2', null, 'Hũ quà'), toggle(j, 'enabled', j.enabled ? 'Đang bật' : 'Đang tắt', render)),
+    h('p.muted', null, 'Mỗi món quà rơi vào một chiếc hũ trên màn hình và xếp chồng lên nhau. Đủ số xu thì hũ đầy, vỡ ra ăn mừng rồi bắt đầu lại. Khán giả nhìn thấy hũ gần đầy sẽ muốn góp cho đầy.'),
+    j.enabled ? [
+      h('div.grid2', null,
+        field('Tên hũ', textInput(j, 'title')),
+        field('Đầy khi đủ (xu)', numInput(j, 'target', { min: 10, max: 1e7 })),
+        field('Vị trí', select(j, 'position', [['right', 'Bên phải'], ['left', 'Bên trái'], ['bottom-right', 'Góc dưới phải'], ['bottom-left', 'Góc dưới trái']])),
+        field('Cỡ hũ', select(j, 'size', [[1, 'Nhỏ'], [2, 'Vừa'], [3, 'Lớn']], () => { j.size = Number(j.size); }))),
+      h('div.btn-row', null,
+        h('button.btn', { type: 'button', onclick: () => act('/api/simulate', { type: 'gift' }) }, 'Thả thử một quà'),
+        h('button.btn.ghost', { type: 'button', onclick: () => act('/api/jar/reset').then(() => toast('Đã đổ hũ về rỗng')) }, 'Đổ hũ')),
+      h('p.small.muted', null, 'Hũ đầy sẽ tự bắn pháo giấy. Muốn thêm video hoặc lời cảm ơn riêng: vào Kịch bản, tạo kịch bản với sự kiện “Hũ quà đầy”.'),
+    ] : null);
+}
+
 function viewGifts() {
   const g = S.config.gifts;
   const general = S.config.rules.filter((r) => r.enabled && r.trigger.type === 'gift' && !r.trigger.giftId && !r.trigger.giftName && !r.trigger.user);
@@ -503,6 +522,7 @@ function viewGifts() {
       h('p.small.muted', null, general.length
         ? `Quà chưa có hiệu ứng riêng sẽ chạy kịch bản chung: ${general.map((r) => r.name).join(', ')}.`
         : 'Hiện không có kịch bản chung nào cho quà: chỉ những quà có hiệu ứng riêng mới được chúc mừng.')),
+    jarCard(),
     h('section.card', null,
       h('div.card-head', null, h('h2', null, `Danh sách quà${S.gifts.length ? ` (${S.gifts.length})` : ''}`)),
       S.gifts.length
@@ -817,14 +837,14 @@ function viewDisplay() {
 }
 
 // --- Mục: Nhật ký -----------------------------------------------------------
-const KIND = { follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
+const KIND = { jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
 function logRow(e) {
   const what = {
     donate: `ủng hộ ${fmtVnd(e.amount)}${e.text ? `: ${e.text}` : ''}`,
     gift: `tặng ${e.count || 1} ${e.giftName || 'quà'}${e.coins ? ` (${e.coins} xu)` : ''}`,
     like: `thả ${e.likeCount || 1} tim`,
     chat: e.text,
-    follow: 'đã follow', share: 'đã chia sẻ', join: 'vào phòng',
+    follow: 'đã follow', share: 'đã chia sẻ', join: 'vào phòng', jar: 'góp món cuối, hũ đã đầy',
   }[e.type] || '';
   const ran = (e.fired || []).map((id) => S.config.rules.find((r) => r.id === id)?.name).filter(Boolean);
   return h('div.log-row', null,

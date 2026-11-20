@@ -29,6 +29,7 @@ export const TRIGGERS = [
   { id: 'chat', name: 'Bình luận chứa từ khoá' },
   { id: 'join', name: 'Có người vào xem' },
   { id: 'donate', name: 'Có người ủng hộ (chuyển khoản, nguồn khác)' },
+  { id: 'jar', name: 'Hũ quà đầy' },
   { id: 'button', name: 'Nút bấm tay (điện thoại, phím tắt)' },
 ];
 
@@ -86,6 +87,7 @@ export function defaultConfig() {
     remote: { enabled: false, token: '' },
     gifts: { celebrate: true },
     captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
+    jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
     camera: { enabled: false, source: '', beat: 'off', amount: 2 },
     music: {
       enabled: false, source: 'system', deviceId: '', sensitivity: 1, palette: 'storm',
@@ -206,6 +208,7 @@ export function sanitizeConfig(input) {
   const gf = c.gifts && typeof c.gifts === 'object' ? c.gifts : {};
   const cp = c.captions && typeof c.captions === 'object' ? c.captions : {};
   const cm = c.camera && typeof c.camera === 'object' ? c.camera : {};
+  const jr = c.jar && typeof c.jar === 'object' ? c.jar : {};
   const mu = c.music && typeof c.music === 'object' ? c.music : {};
   const ly = mu.layers && typeof mu.layers === 'object' ? mu.layers : {};
   const al = w.alerts || {};
@@ -293,6 +296,13 @@ export function sanitizeConfig(input) {
       token: /^[0-9a-f]{32}$/.test(rm.token) ? rm.token : '',
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
+    jar: {
+      enabled: bool(jr.enabled, false),
+      title: str(jr.title, 30) || 'Hũ quà',
+      target: Math.round(num(jr.target, 10, 1e7, 500)),
+      position: oneOf(jr.position, ['right', 'left', 'bottom-right', 'bottom-left'], 'right'),
+      size: Math.round(num(jr.size, 1, 3, 2)),
+    },
     camera: {
       enabled: bool(cm.enabled, false),
       source: str(cm.source, 120),

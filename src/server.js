@@ -9,6 +9,7 @@ import { sendJson, readBody, readJson, saveBody, serveFile } from './http.js';
 import { createRemote } from './remote.js';
 import { GiftCatalog } from './gifts.js';
 import { ObsCamera } from './obscam.js';
+import { Jar } from './jar.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -68,6 +69,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const tiktok = source || new TikTokSource();
   const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
   tiktok.catalog = catalog;
+  const jar = new Jar(() => store.config);
   const camera = new ObsCamera({ getConfig: () => store.config, port: obsPort, onStatus: () => broadcast('panel', statusMsg()) });
   const twitch = twitchInjected || new TwitchSource();
   const sepay = sepayInjected || new SepaySource();
@@ -94,6 +96,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       type: 'widgets',
       music: store.config.music,
       captions: store.config.captions,
+      jar: store.config.jar,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
   };
@@ -149,6 +152,18 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       mergeGifts([{ id: ev.giftId, name: ev.giftName, coins: Math.round((ev.coins || 0) / (ev.count || 1)), image: ev.giftImage }]);
     }
     const fired = engine.handle(ev);
+    // Hũ quà: quà nào cũng rơi vào hũ (kể cả khi đang tắt chúc mừng); đầy thì vỡ và chạy kịch bản "Hũ quà đầy".
+    if (ev.type === 'gift') {
+      const put = jar.add({ coins: ev.coins, count: ev.count, image: ev.giftImage });
+      if (put) {
+        broadcast('overlay', { type: 'jardrop', drop: put.drop, coins: put.full ? store.config.jar.target : jar.coins });
+        if (put.full) {
+          broadcast('overlay', { type: 'jarburst', rounds: jar.rounds });
+          const full = { type: 'jar', user: ev.user, nickname: ev.nickname, avatar: ev.avatar, coins: store.config.jar.target, simulated: ev.simulated };
+          record(full, engine.handle(full));
+        }
+      }
+    }
     // Người vào xem xuất hiện dồn dập; chỉ ghi nhật ký khi có kịch bản chạy.
     if (ev.type !== 'join' || fired.length) record(ev, fired);
     const tts = store.config.tts;
@@ -165,7 +180,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
   tiktok.on('event', ingest);
   tiktok.on('status', (s) => {
-    if (s.state === 'connected' && tiktok.lastState !== 'connected') engine.resetSession();
+    if (s.state === 'connected' && tiktok.lastState !== 'connected') { engine.resetSession(); jar.reset(); broadcast('overlay', jar.state()); }
     tiktok.lastState = s.state;
     broadcast('panel', statusMsg());
   });
@@ -178,6 +193,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     broadcast('overlay', widgetsMsg());
     broadcast('overlay', engine.goalState());
     broadcast('overlay', engine.topState());
+    broadcast('overlay', { ...jar.state(), drops: undefined });
     broadcast('panel', { type: 'config', config: store.config });
     onConfigChange?.(store.config);
   };
@@ -431,6 +447,12 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       return sendJson(res, 200, { ok: true });
     }
 
+    if (route === 'POST /api/jar/reset') {
+      jar.reset();
+      broadcast('overlay', jar.state());
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (route === 'POST /api/goal/reset') {
       engine.resetSession();
       return sendJson(res, 200, { ok: true });
@@ -552,6 +574,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (client.role === 'overlay') {
         ws.send(JSON.stringify(widgetsMsg()));
         ws.send(JSON.stringify(engine.goalState()));
+        ws.send(JSON.stringify(jar.state()));
         ws.send(JSON.stringify(engine.topState()));
       } else {
         ws.send(JSON.stringify(statusMsg()));

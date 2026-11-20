@@ -176,3 +176,56 @@ test('kịch bản kèm chuyển động camera, và phụ đề chỉ lên són
     ws.close();
   } finally { await app.close(); await obs.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test('hũ quà: quà rơi vào hũ, đủ xu thì đầy, vỡ và chạy kịch bản "Hũ quà đầy"', async () => {
+  const { Jar } = await import('../src/jar.js');
+  const cfg = { jar: { enabled: true, target: 100, title: 'Hũ quà' } };
+  const jar = new Jar(() => cfg);
+  assert.deepEqual(jar.add({ coins: 30, count: 30, image: 'javascript:x' }), { drop: { image: '', each: 1, n: 10 }, full: false });
+  assert.equal(jar.add({ coins: 0 }), null);
+  assert.equal(jar.state().coins, 30);
+  const last = jar.add({ coins: 500, count: 1, image: 'https://cdn/lion.png' });
+  assert.equal(last.full, true);
+  assert.deepEqual(last.drop, { image: 'https://cdn/lion.png', each: 500, n: 1 });
+  assert.deepEqual([jar.coins, jar.drops.length, jar.rounds], [0, 0, 1]);
+  // Số món hiển thị có trần, để hũ không phình mãi.
+  cfg.jar.target = 1e6;
+  for (let i = 0; i < 40; i++) jar.add({ coins: 10, count: 10 });
+  assert.ok(jar.drops.reduce((s, d) => s + d.n, 0) <= 130);
+  cfg.jar.enabled = false;
+  assert.equal(jar.add({ coins: 10 }), null);
+
+  // Qua máy chủ: overlay nhận món rơi, lúc đầy nhận lệnh vỡ, và kịch bản "Hũ quà đầy" chạy.
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'le-jar-'));
+  const app = await startApp({ dataDir, port: 0 });
+  const call = async (method, url, body) => (await fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
+  try {
+    const { config } = await call('GET', '/api/state');
+    config.jar = { ...config.jar, enabled: true, target: 20 };
+    config.gifts.celebrate = false; // tắt chúc mừng: quà vẫn phải rơi vào hũ
+    config.rules.push({ id: 'jarfull', name: 'Hũ đầy', trigger: { type: 'jar' }, action: { effect: 'stars', text: 'Hũ đã đầy, cảm ơn {user}!' } });
+    await call('PUT', '/api/config', config);
+    const { default: WebSocket } = await import('ws');
+    const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws?role=overlay`);
+    const msgs = [];
+    ws.on('message', (d) => msgs.push(JSON.parse(d)));
+    await new Promise((r) => ws.on('open', r));
+    await until(() => msgs.some((m) => m.type === 'jar'));
+    assert.equal(msgs.find((m) => m.type === 'widgets').jar.target, 20);
+    app.ingest({ type: 'gift', nickname: 'An', giftName: 'Rose', count: 5, coins: 5, giftImage: 'https://cdn/rose.png' });
+    app.ingest({ type: 'gift', nickname: 'Bình', giftName: 'Hat', count: 1, coins: 99 });
+    await until(() => msgs.some((m) => m.type === 'jarburst'));
+    const drops = msgs.filter((m) => m.type === 'jardrop');
+    assert.deepEqual(drops.map((m) => [m.drop.n, m.drop.each, m.coins]), [[5, 1, 5], [1, 99, 20]]);
+    const fx = msgs.filter((m) => m.type === 'fx');
+    assert.deepEqual(fx.map((m) => [m.effect, m.alert]), [['stars', 'Hũ đã đầy, cảm ơn Bình!']]);
+    // Overlay mở sau khi hũ vỡ thấy hũ rỗng; đổ hũ thì về 0.
+    app.ingest({ type: 'gift', nickname: 'An', giftName: 'Rose', count: 3, coins: 3 });
+    const late = new WebSocket(`ws://127.0.0.1:${app.port}/ws?role=overlay`);
+    const got = await new Promise((r) => late.on('message', (d) => { const m = JSON.parse(d); if (m.type === 'jar') r(m); }));
+    assert.deepEqual([got.coins, got.rounds, got.drops.length], [3, 1, 1]);
+    await call('POST', '/api/jar/reset');
+    await until(() => msgs.filter((m) => m.type === 'jar').at(-1)?.rounds === 0);
+    ws.close(); late.close();
+  } finally { await app.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
