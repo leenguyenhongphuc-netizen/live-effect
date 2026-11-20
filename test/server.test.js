@@ -155,3 +155,110 @@ test('điện thoại: tắt mặc định, cần mã ghép nối, chỉ bấm �
     ov.ws.close();
   } finally { await t.stop(); }
 });
+
+class FakePoller extends EventEmitter {
+  status = { state: 'idle', error: '' };
+  started = null;
+  start(opts) { this.started = opts; this.status = { state: 'connected', error: '' }; this.emit('status', this.status); }
+  stop() { this.started = null; this.status = { state: 'idle', error: '' }; }
+}
+
+test('ủng hộ: chuyển khoản tới overlay, mã QR theo tài khoản, link nhận sự kiện cần đúng khoá', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-effect-test-'));
+  const sepay = new FakePoller();
+  const app = await startApp({ dataDir, port: 0, source: new FakeSource(), sepay, twitch: new FakeSource() });
+  const base = `http://127.0.0.1:${app.port}`;
+  const put = async (config) => (await fetch(`${base}/api/config`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })).json();
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws?role=overlay`);
+    const msgs = [];
+    ws.on('message', (d) => msgs.push(JSON.parse(d)));
+    await new Promise((r) => ws.on('open', r));
+    const wait = async (pred) => { for (let i = 0; i < 100; i++) { const m = msgs.find(pred); if (m) return m; await new Promise((r) => setTimeout(r, 10)); } throw new Error('không nhận được tin'); };
+    assert.equal((await wait((m) => m.type === 'widgets')).widgets.qr.svg, '');
+    assert.equal(sepay.started, null);
+
+    const cfg = app.config;
+    const saved = await put({
+      ...cfg,
+      donate: { enabled: true, sepayToken: 'tok', bank: '970422', account: '0123456789', holder: 'NGUYEN VAN A', memo: 'Ung ho' },
+      hook: { enabled: true, key: 'f'.repeat(32) },
+      widgets: { ...cfg.widgets, qr: { ...cfg.widgets.qr, enabled: true } },
+    });
+    assert.deepEqual(sepay.started, { token: 'tok', account: '0123456789' });
+    const w = await wait((m) => m.type === 'widgets' && m.widgets.qr.svg);
+    assert.match(w.widgets.qr.svg, /^<svg/);
+    assert.equal(w.widgets.qr.bank, 'MB Bank');
+    assert.equal(w.widgets.qr.holder, 'NGUYEN VAN A');
+
+    sepay.emit('event', { type: 'donate', user: '', nickname: '', amount: 50000, text: 'co len nha', source: 'bank' });
+    assert.equal((await wait((m) => m.type === 'fx')).alert, 'Một bạn ủng hộ 50.000đ co len nha');
+
+    // Khoá của link do máy chủ tạo, không nhận khoá bảng điều khiển gửi lên.
+    const key = saved.config.hook.key;
+    assert.match(key, /^[0-9a-f]{32}$/);
+    assert.notEqual(key, 'f'.repeat(32));
+    assert.equal(saved.hookUrl, `${base}/hook/${key}`);
+    assert.equal((await fetch(`${base}/hook/${'f'.repeat(32)}?type=donate&amount=1`)).status, 404);
+    msgs.length = 0;
+    assert.equal((await fetch(`${base}/hook/${key}?type=donate&name=An&amount=120000&text=hay`)).status, 200);
+    assert.equal((await wait((m) => m.type === 'fx')).alert, 'An ủng hộ 120.000đ hay');
+    msgs.length = 0;
+    assert.equal((await fetch(`${base}/hook/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ button: 'ăn mừng' }) })).status, 200);
+    assert.equal((await wait((m) => m.type === 'fx')).effect, 'fireworks');
+    assert.equal((await fetch(`${base}/hook/${key}?type=khong-co`)).status, 400);
+    assert.equal((await fetch(`${base}/hook/${key}?button=khong-co`)).status, 404);
+
+    // Tắt: link cũ chết, SePay dừng.
+    await put({ ...app.config, donate: { ...app.config.donate, enabled: false }, hook: { enabled: false } });
+    assert.equal(sepay.started, null);
+    assert.equal((await fetch(`${base}/hook/${key}?type=donate&amount=1`)).status, 404);
+    ws.close();
+  } finally { await app.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test('điện thoại: tải video lên thành nút mới kèm ảnh thu nhỏ, vẫn cần mã ghép nối', async () => {
+  const t = await boot();
+  try {
+    const { body: state } = await t.json('GET', '/api/state');
+    state.config.remote.enabled = true;
+    const { body: on } = await t.json('PUT', '/api/config', state.config);
+    const token = on.config.remote.token;
+    const remote = `http://127.0.0.1:${on.remote.port}`;
+    const name = encodeURIComponent('Vương Lâm.mov');
+
+    assert.equal((await fetch(`${remote}/r/upload?name=${name}`, { method: 'POST', body: 'x' })).status, 401);
+    assert.equal((await fetch(`${remote}/r/upload?name=virus.exe`, { method: 'POST', headers: { 'X-Key': token }, body: 'x' })).status, 400);
+    assert.equal((await fetch(`${remote}/r/upload?name=${name}`, { method: 'POST', headers: { 'X-Key': token }, body: '' })).status, 400);
+
+    const up = await fetch(`${remote}/r/upload?name=${name}&title=${encodeURIComponent('Hùng - Vương Lâm')}`, { method: 'POST', headers: { 'X-Key': token }, body: Buffer.from('fake video') });
+    const upBody = await up.json();
+    assert.equal(up.status, 200);
+    assert.equal(upBody.name, 'Vương Lâm.mov');
+    assert.equal(fs.readFileSync(path.join(t.dataDir, 'media', 'Vương Lâm.mov'), 'utf8'), 'fake video');
+    assert.ok(!fs.existsSync(path.join(t.dataDir, 'media', 'Vương Lâm.mov.part')));
+    assert.equal((await fetch(`${t.base}/media/${name}`)).headers.get('content-type'), 'video/mp4');
+
+    const rule = t.app.config.rules.find((r) => r.id === upBody.ruleId);
+    assert.deepEqual([rule.name, rule.trigger.type, rule.action.media, rule.action.effect], ['Hùng - Vương Lâm', 'button', 'Vương Lâm.mov', 'none']);
+
+    // Ảnh thu nhỏ: chỉ nhận JPEG thật, cho tệp có trong thư viện.
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    const thumb = (n, body, key = token) => fetch(`${remote}/r/thumb?name=${n}`, { method: 'POST', headers: { 'X-Key': key }, body });
+    assert.equal((await thumb(name, Buffer.from('<svg onload=alert(1)>'))).status, 400);
+    assert.equal((await thumb('khong-co.mp4', jpeg)).status, 400);
+    assert.equal((await thumb(name, jpeg, 'sai')).status, 401);
+    assert.equal((await thumb(name, jpeg)).status, 200);
+    assert.equal((await fetch(`${remote}/r/thumb/${name}`)).status, 401);
+    const got = await fetch(`${remote}/r/thumb/${name}`, { headers: { 'X-Key': token } });
+    assert.equal(got.headers.get('content-type'), 'image/jpeg');
+    assert.equal((await fetch(`${t.base}/thumb/${name}`)).status, 200);
+
+    const rs = await (await fetch(`${remote}/r/state`, { headers: { 'X-Key': token } })).json();
+    assert.deepEqual(rs.buttons.at(-1), { id: upBody.ruleId, name: 'Hùng - Vương Lâm', effect: 'none', media: 'Vương Lâm.mov', thumb: true });
+
+    // Xoá tệp thì ảnh thu nhỏ cũng mất.
+    await t.json('DELETE', `/api/media/${name}`);
+    assert.equal((await fetch(`${t.base}/thumb/${name}`)).status, 404);
+  } finally { await t.stop(); }
+});

@@ -10,8 +10,14 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
   *Chúc mừng quà tặng* bật tắt được ngay trên điện thoại.
 - **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.
-- 8 hiệu ứng có sẵn (pháo giấy, pháo hoa, tim, sao, xu, tuyết, mưa quà, viền sáng), 6 âm thanh, thông báo, khung bình luận, thanh mục tiêu, giọng đọc.
-- Phím tắt toàn hệ thống cho stream game (YouTube, Facebook, Twitch qua OBS).
+  Chọn một video trong thư viện ảnh của điện thoại là có ngay nút mới kèm ảnh thu nhỏ.
+- **Ủng hộ bằng chuyển khoản → hiệu ứng**: mã VietQR hiện trên sóng, tiền vào thẳng tài khoản của bạn, ứng dụng nhận biết qua SePay
+  rồi chạy hiệu ứng, hiện lời nhắn, đọc lời nhắn. Không tài khoản Live Effect, không phí, không qua máy chủ trung gian.
+- **Quà từ bất kỳ nguồn nào**: một link nhận sự kiện trên máy để Streamer.bot, Stream Deck, công cụ donate khác gọi vào.
+- **Stream game**: đọc chat Twitch không cần đăng nhập (từ khoá, Bits, Sub), phím tắt toàn hệ thống cho mọi nền tảng.
+- **Tự thêm vào OBS** bằng một lần bấm (qua WebSocket có sẵn của OBS 28+).
+- 8 hiệu ứng có sẵn (pháo giấy, pháo hoa, tim, sao, xu, tuyết, mưa quà, viền sáng), 6 âm thanh, thông báo, khung bình luận,
+  thanh mục tiêu, bảng top tặng quà, giọng đọc.
 
 ## Cài đặt
 
@@ -22,7 +28,8 @@ Trong đó có bản cài đặt và bản chạy thẳng (`LiveEffect-portable-
 
 ## Dùng trong 3 bước
 
-1. **Dán link overlay** (mặc định `http://127.0.0.1:3939/overlay`) vào phần mềm live:
+1. **Đưa overlay vào phần mềm live**. Với OBS: bấm *Tự thêm vào OBS giúp tôi* (OBS đang mở, đã bật
+   *Tools → WebSocket Server Settings → Enable WebSocket server*). Hoặc dán link overlay (mặc định `http://127.0.0.1:3939/overlay`) bằng tay:
    - OBS: *Sources → + → Browser*, kích thước 1080×1920 (dọc) hoặc 1920×1080 (ngang), kéo lên trên cùng.
    - TikTok LIVE Studio: *Thêm nguồn → Liên kết*, kéo cho phủ kín khung hình.
 2. **Nhập ID TikTok** của kênh rồi bấm *Kết nối*. Không cần mật khẩu. Nếu kênh chưa lên sóng, ứng dụng tự chờ
@@ -38,6 +45,25 @@ cạnh một video để có ngay nút phát video đó toàn màn hình.
 Tính năng này tắt mặc định. Khi bật, ứng dụng mở một cổng trong mạng nội bộ chỉ phục vụ trang điều khiển;
 mọi lệnh phải kèm mã ghép nối ngẫu nhiên nằm trong mã QR. *Đổi mã ghép nối* để thu hồi các thiết bị cũ.
 
+### Ủng hộ bằng chuyển khoản
+
+Mục *Ủng hộ*: chọn ngân hàng, nhập số tài khoản → mã VietQR hiện trên khung hình (mã được tạo ngay trên máy).
+Để hiệu ứng tự chạy khi có tiền vào, tạo tài khoản [SePay](https://sepay.vn), thêm tài khoản ngân hàng đó vào SePay,
+tạo API Token (*Cấu hình công ty → API Access*) rồi dán vào ứng dụng. Ứng dụng hỏi SePay 6 giây một lần; giao dịch có
+trước lúc bật không phát hiệu ứng. Nội dung chuyển khoản là lời nhắn hiện trên sóng, đã lọc bỏ số tài khoản và mã giao dịch.
+
+### Link nhận sự kiện (nguồn khác)
+
+Mục *Ủng hộ → Nguồn khác*: bật công tắc để có link dạng `http://127.0.0.1:3939/hook/<khoá>`. Gọi bằng GET hoặc POST JSON:
+
+```
+.../hook/<khoá>?type=donate&name=An&amount=50000&text=Co%20len
+.../hook/<khoá>?type=gift&name=An&gift=Rose&coins=10&count=10
+.../hook/<khoá>?button=Ăn mừng
+```
+
+`type` nhận `donate, gift, follow, share, chat, like, join`. Link chỉ nghe trên chính máy này.
+
 ## Giới hạn cần biết
 
 - Kết nối TikTok dùng thư viện không chính thức [`tiktok-live-connector`](https://github.com/zerodytrash/TikTok-Live-Connector),
@@ -45,8 +71,12 @@ mọi lệnh phải kèm mã ghép nối ngẫu nhiên nằm trong mã QR. *Đ�
   TikTok đổi giao thức thì cần cập nhật thư viện.
 - Giọng đọc tiếng Việt cần cài giọng `vi-VN` trong Windows.
 - *Nhạc và nhịp* cần bấm **Bắt đầu nghe** mỗi lần mở ứng dụng. Phần lắc / xoay camera theo nhịp cần nối với OBS và chưa có.
-- Chưa có: phụ đề dịch đa ngôn ngữ, nhận chuyển khoản ngân hàng → hiệu ứng, điều khiển OBS (đổi cảnh, lắc camera),
-  bấm hiệu ứng bằng dàn pad MIDI, ảnh thu nhỏ cho nút video, kết nối chat YouTube.
+- Nhận chuyển khoản cần tài khoản SePay (bên thứ ba, có gói miễn phí giới hạn số giao dịch). Tên người chuyển không có sẵn
+  trong dữ liệu ngân hàng nên thông báo ghi “Một bạn” kèm nội dung chuyển khoản.
+- TikTok có thể hạn chế việc hiện mã nhận tiền trên live; tự cân nhắc theo quy định nền tảng.
+- Video quay bằng iPhone (`.mov`) phát được khi là H.264; video HEVC cần đổi sang MP4 trước.
+- Chưa có: phụ đề dịch đa ngôn ngữ, dịch bình luận, chat YouTube / Facebook, đổi cảnh và lắc camera qua OBS,
+  bấm hiệu ứng bằng dàn pad MIDI, hũ quà, mini-game, bảng PK.
 
 ## Phát triển
 

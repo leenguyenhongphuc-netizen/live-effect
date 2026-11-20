@@ -296,3 +296,10 @@ details.adv[open] > summary { margin-bottom: 10px; }
 /* Bảng điều khiển dùng giao diện tối; nếu không đặt lại, trình duyệt sẽ tô nền trắng đục
    cho khung overlay (vốn trong suốt) vì hai trang khác chế độ màu. */
 .stage iframe { color-scheme: normal; }
+
+/* --- Bản 0.2: tự thêm vào OBS, ảnh thu nhỏ, mục Ủng hộ ---------------------- */
+.auto-obs { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.auto-obs > .small { flex: 1 1 240px; }
+.auto-obs > .note { flex-basis: 100%; }
+img.thumb { width: 44px; height: 44px; flex: none; border-radius: 8px; object-fit: cover; background: var(--bg); }
+details.adv > * + * { margin-top: 10px; }

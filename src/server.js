@@ -1,19 +1,25 @@
 import http from 'node:http';
-import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import QRCode from 'qrcode';
 import { Store } from './store.js';
-import { sendJson, readBody, readJson, serveFile } from './http.js';
+import { sendJson, readBody, readJson, saveBody, serveFile } from './http.js';
 import { createRemote } from './remote.js';
 import { GiftCatalog } from './gifts.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
+import { TwitchSource } from './twitch.js';
+import { SepaySource, BANKS, vietQrPayload } from './donate.js';
+import { addToObs } from './obs.js';
 import { EFFECTS, SOUNDS, TRIGGERS, MEDIA_EXT, DEFAULT_PORT, safeMediaName, blankRule } from './defaults.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, '..', 'public');
-const MAX_MEDIA_BYTES = 80 * 1024 * 1024;
+const MAX_MEDIA_BYTES = 300 * 1024 * 1024;
+const MAX_THUMB_BYTES = 400 * 1024;
+const BAD_TYPE = 'Loại tệp không hỗ trợ. Dùng ảnh (png, jpg, gif, webp), video (webm, mp4, mov) hoặc âm thanh (mp3, wav, ogg).';
 
 const SAMPLE = {
   follow: { type: 'follow', user: 'ban_xem_moi', nickname: 'Bạn xem mới' },
@@ -23,29 +29,87 @@ const SAMPLE = {
   share: { type: 'share', user: 'ban_than', nickname: 'Bạn thân' },
   chat: { type: 'chat', user: 'khan_gia', nickname: 'Khán giả', text: 'Chào cả nhà nha!' },
   join: { type: 'join', user: 'khach_moi', nickname: 'Khách mới' },
+  donate: { type: 'donate', user: '', nickname: 'Minh Anh', amount: 50000, text: 'Chị live vui quá, cố lên nha!' },
 };
+
+const HOOK_TYPES = ['donate', 'gift', 'follow', 'share', 'chat', 'like', 'join'];
+const cut = (v, max) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : '');
+const posNum = (v, max) => Math.min(max, Math.max(0, Math.round(Number(v) || 0)));
+
+/** Đổi tham số của link nhận sự kiện thành một sự kiện chuẩn. Trả về null nếu không hợp lệ. */
+export function hookEvent(p) {
+  if (!HOOK_TYPES.includes(p.type)) return null;
+  const name = cut(p.name, 60).trim();
+  const ev = { type: p.type, user: name, nickname: name, text: cut(p.text, 200), source: 'hook' };
+  if (p.type === 'donate') ev.amount = posNum(p.amount, 1e10);
+  if (p.type === 'gift') {
+    ev.count = posNum(p.count, 1e6) || 1;
+    ev.coins = posNum(p.coins, 1e9);
+    ev.giftName = cut(p.gift, 60) || 'quà';
+  }
+  if (p.type === 'like') ev.likeCount = posNum(p.count, 1e6) || 1;
+  return ev;
+}
+
+function sameKey(given, expected) {
+  if (typeof given !== 'string' || !expected) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 /**
  * Khởi động lõi ứng dụng: máy chủ HTTP + WebSocket chỉ nghe trên máy này.
  * @returns {Promise<object>} điều khiển ứng dụng (url, fireRule, close...)
  */
-export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source } = {}) {
+export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source, twitch: twitchInjected, sepay: sepayInjected, obs = addToObs } = {}) {
   const store = new Store(dataDir);
   const tiktok = source || new TikTokSource();
   const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
   tiktok.catalog = catalog;
+  const twitch = twitchInjected || new TwitchSource();
+  const sepay = sepayInjected || new SepaySource();
   const clients = new Set(); // { ws, role }
   const log = []; // nhật ký sự kiện gần đây
   let hotkeyErrors = [];
   let boundPort = port;
+  let qrCache = { payload: null, svg: '' };
+  let sepayKey = '';
 
   const broadcast = (role, msg) => {
     const data = JSON.stringify(msg);
     for (const c of clients) if (c.role === role && c.ws.readyState === 1) c.ws.send(data);
   };
   const overlayCount = () => [...clients].filter((c) => c.role === 'overlay' && !c.preview).length;
-  const statusMsg = () => ({ type: 'status', tiktok: tiktok.status, overlays: overlayCount(), hotkeyErrors });
-  const widgetsMsg = () => ({ type: 'widgets', widgets: store.config.widgets, music: store.config.music });
+  const statusMsg = () => ({
+    type: 'status', tiktok: tiktok.status, twitch: twitch.status, donate: sepay.status, overlays: overlayCount(), hotkeyErrors,
+  });
+  const widgetsMsg = () => {
+    const w = store.config.widgets;
+    const dn = store.config.donate;
+    return {
+      type: 'widgets',
+      music: store.config.music,
+      widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
+    };
+  };
+
+  /** Vẽ lại mã VietQR khi thông tin tài khoản đổi. Mã được tạo ngay trên máy này. */
+  async function refreshQr() {
+    const dn = store.config.donate;
+    const payload = vietQrPayload({ bin: dn.bank, account: dn.account, memo: dn.memo });
+    if (payload === qrCache.payload) return;
+    qrCache = { payload, svg: payload ? await QRCode.toString(payload, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) : '' };
+  }
+
+  function syncSepay() {
+    const dn = store.config.donate;
+    const key = dn.enabled && dn.sepayToken ? `${dn.sepayToken}|${dn.account}` : '';
+    if (key === sepayKey) return;
+    sepayKey = key;
+    if (key) sepay.start({ token: dn.sepayToken, account: dn.account });
+    else sepay.stop();
+  }
 
   // Khung phân tích nhạc từ bảng điều khiển: kiểm tra từng số rồi mới chuyển cho overlay.
   const unit = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0; };
@@ -85,6 +149,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (ev.type === 'chat' && tts.chat && ev.text) say = `${who} nói ${String(ev.text).slice(0, tts.maxLength)}`;
       else if (ev.type === 'gift' && tts.gift) say = `Cảm ơn ${who} đã tặng ${ev.count || 1} ${ev.giftName || 'quà'}`;
       else if (ev.type === 'follow' && tts.follow && fired.length) say = `Cảm ơn ${who} đã follow`;
+      else if (ev.type === 'donate' && tts.donate) say = `Cảm ơn ${who} đã ủng hộ ${ev.amount || 0} đồng. ${String(ev.text || '').slice(0, tts.maxLength)}`;
       if (say) broadcast('panel', { type: 'tts', text: say });
     }
   };
@@ -95,6 +160,58 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     tiktok.lastState = s.state;
     broadcast('panel', statusMsg());
   });
+  twitch.on('event', ingest);
+  twitch.on('status', () => broadcast('panel', statusMsg()));
+  sepay.on('event', ingest);
+  sepay.on('status', () => broadcast('panel', statusMsg()));
+
+  const pushConfig = () => {
+    broadcast('overlay', widgetsMsg());
+    broadcast('overlay', engine.goalState());
+    broadcast('overlay', engine.topState());
+    broadcast('panel', { type: 'config', config: store.config });
+    onConfigChange?.(store.config);
+  };
+
+  /** Nhận một tệp vào thư viện. Trả về [mã HTTP, nội dung trả lời]. */
+  async function receiveMedia(req, url) {
+    const safe = safeMediaName(url.searchParams.get('name'));
+    if (!safe) return [400, { error: BAD_TYPE }];
+    try {
+      await saveBody(req, path.join(store.mediaDir, safe.name), MAX_MEDIA_BYTES);
+    } catch (err) {
+      if (err.status === 413) return [413, { error: 'Tệp quá lớn (tối đa 300 MB).' }];
+      if (err.status === 400) return [400, { error: 'Tệp rỗng hoặc bị ngắt giữa chừng. Hãy thử lại.' }];
+      throw err;
+    }
+    broadcast('panel', { type: 'media', media: store.listMedia() });
+    return [200, { name: safe.name, kind: safe.kind, media: store.listMedia() }];
+  }
+
+  async function receiveThumb(req, url) {
+    const safe = safeMediaName(url.searchParams.get('name'));
+    if (!safe || safe.kind === 'audio' || !store.listMedia().includes(safe.name)) return [400, { error: 'Không có tệp này trong thư viện' }];
+    let buf;
+    try { buf = await readBody(req, MAX_THUMB_BYTES); } catch { return [413, { error: 'Ảnh thu nhỏ quá lớn' }]; }
+    return store.saveThumb(safe.name, buf) ? [200, { ok: true }] : [400, { error: 'Ảnh thu nhỏ phải là JPEG' }];
+  }
+
+  /** Tạo một "Nút bấm tay" phát video/hình toàn màn hình; nút hiện ngay trên điện thoại. */
+  function addMediaButton(file, title) {
+    const rule = blankRule(`r-${Date.now().toString(36)}`);
+    rule.name = (cut(title, 60).trim() || file.replace(/\.[^.]+$/, '')).slice(0, 60);
+    rule.trigger.type = 'button';
+    rule.action = { ...rule.action, effect: 'none', sound: 'none', alert: false, text: '', media: file, mediaFit: 'cover' };
+    store.set({ ...store.config, rules: [...store.config.rules, rule] });
+    pushConfig();
+    return rule.id;
+  }
+
+  const serveThumb = (res, name) => {
+    const safe = safeMediaName(name);
+    if (!safe) return sendJson(res, 404, { error: 'not found' });
+    return serveFile(res, store.thumbDir, `${safe.name}.jpg`);
+  };
 
   const remote = createRemote({
     publicDir: PUBLIC_DIR,
@@ -106,10 +223,10 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       celebrate: store.config.gifts.celebrate,
       buttons: store.config.rules
         .filter((r) => r.enabled && r.trigger.type === 'button')
-        .map((r) => ({ id: r.id, name: r.name, effect: r.action.effect, media: Boolean(r.action.media) })),
+        .map((r) => ({ id: r.id, name: r.name, effect: r.action.effect, media: r.action.media, thumb: store.hasThumb(r.action.media) })),
       effects: EFFECTS,
     }),
-    // Điện thoại chỉ được làm ba việc: bấm một nút, chạy một hiệu ứng có sẵn, dừng tất cả.
+    // Điện thoại chỉ được: bấm một nút, chạy một hiệu ứng có sẵn, dừng tất cả, và thêm video/hình thành nút mới.
     fire: (body) => {
       if (typeof body.celebrate === 'boolean') {
         store.set({ ...store.config, gifts: { ...store.config.gifts, celebrate: body.celebrate } });
@@ -130,8 +247,30 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       }
       return false;
     },
+    extra: async (req, res, url) => {
+      const route = `${req.method} ${url.pathname}`;
+      if (route === 'POST /r/upload') {
+        const [status, body] = await receiveMedia(req, url);
+        if (status === 200 && body.kind !== 'audio') body.ruleId = addMediaButton(body.name, url.searchParams.get('title'));
+        delete body.media; // điện thoại không cần danh sách thư viện
+        sendJson(res, status, body);
+        return true;
+      }
+      if (route === 'POST /r/thumb') {
+        const [status, body] = await receiveThumb(req, url);
+        sendJson(res, status, body);
+        return true;
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/r/thumb/')) {
+        serveThumb(res, decodeURIComponent(url.pathname.slice('/r/thumb/'.length)));
+        return true;
+      }
+      return false;
+    },
     onChange: () => remote.info().then((info) => broadcast('panel', { type: 'remote', remote: info })).catch(() => {}),
   });
+
+  const hookUrl = () => (store.config.hook.enabled && store.config.hook.key ? `http://127.0.0.1:${boundPort}/hook/${store.config.hook.key}` : '');
 
   const state = async () => ({
     remote: await remote.info(),
@@ -139,8 +278,9 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     status: statusMsg(),
     media: store.listMedia(),
     gifts: catalog.list(),
-    catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT },
+    catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
+    hookUrl: hookUrl(),
     capabilities: { hotkeys },
     log: log.slice(-100),
   });
@@ -163,12 +303,11 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (route === 'PUT /api/config') {
       const body = await readJson(req);
       store.set(body);
-      broadcast('overlay', widgetsMsg());
-      broadcast('overlay', engine.goalState());
-      broadcast('panel', { type: 'config', config: store.config });
-      onConfigChange?.(store.config);
+      await refreshQr();
+      syncSepay();
+      pushConfig();
       await remote.sync();
-      return sendJson(res, 200, { config: store.config, remote: await remote.info() });
+      return sendJson(res, 200, { config: store.config, remote: await remote.info(), hookUrl: hookUrl() });
     }
 
     if (route === 'POST /api/remote/rotate') {
@@ -193,6 +332,27 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (route === 'POST /api/disconnect') {
       await tiktok.disconnect();
       return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/twitch/connect') {
+      const body = await readJson(req);
+      const channel = cut(body.channel, 80) || store.config.twitch.channel;
+      twitch.connect(channel);
+      const joined = twitch.status.channel;
+      if (joined && joined !== store.config.twitch.channel) {
+        store.set({ ...store.config, twitch: { channel: joined } });
+        broadcast('panel', { type: 'config', config: store.config });
+      }
+      return sendJson(res, 202, { ok: true });
+    }
+
+    if (route === 'POST /api/twitch/disconnect') {
+      twitch.disconnect();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/obs/add') {
+      return sendJson(res, 200, await obs(`http://127.0.0.1:${boundPort}/overlay`));
     }
 
     if (route === 'POST /api/test') {
@@ -248,29 +408,51 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     }
 
     if (route === 'POST /api/media') {
-      const safe = safeMediaName(url.searchParams.get('name'));
-      if (!safe) return sendJson(res, 400, { error: 'Loại tệp không hỗ trợ. Dùng ảnh (png, jpg, gif, webp), video (webm, mp4) hoặc âm thanh (mp3, wav, ogg).' });
-      let buf;
-      try {
-        buf = await readBody(req, MAX_MEDIA_BYTES);
-      } catch (err) {
-        if (err.status === 413) return sendJson(res, 413, { error: 'Tệp quá lớn (tối đa 80 MB).' });
-        throw err;
-      }
-      fs.writeFileSync(path.join(store.mediaDir, safe.name), buf);
-      broadcast('panel', { type: 'media', media: store.listMedia() });
-      return sendJson(res, 200, { name: safe.name, kind: safe.kind, media: store.listMedia() });
+      const [status, body] = await receiveMedia(req, url);
+      return sendJson(res, status, body);
+    }
+
+    if (route === 'POST /api/thumb') {
+      const [status, body] = await receiveThumb(req, url);
+      return sendJson(res, status, body);
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/media/')) {
       const safe = safeMediaName(decodeURIComponent(url.pathname.slice('/api/media/'.length)));
       if (!safe) return sendJson(res, 400, { error: 'Tên tệp không hợp lệ' });
-      try { fs.unlinkSync(path.join(store.mediaDir, safe.name)); } catch { /* đã xoá */ }
+      store.removeMedia(safe.name);
       broadcast('panel', { type: 'media', media: store.listMedia() });
       return sendJson(res, 200, { media: store.listMedia() });
     }
 
     return sendJson(res, 404, { error: 'not found' });
+  }
+
+  /**
+   * Link nhận sự kiện từ công cụ khác trên máy này (Streamer.bot, Stream Deck, script...):
+   *   /hook/<khoá>?type=donate&name=An&amount=50000&text=...
+   *   /hook/<khoá>?button=<tên hoặc id nút bấm tay>
+   * Khoá nằm ngay trong link nên dùng được cả GET lẫn POST.
+   */
+  async function hook(req, res, url, key) {
+    const cfg = store.config.hook;
+    if (!cfg.enabled || !sameKey(key, cfg.key)) return sendJson(res, 404, { error: 'not found' });
+    let params = Object.fromEntries(url.searchParams);
+    if (req.method === 'POST') {
+      const body = await readJson(req);
+      if (body && typeof body === 'object') params = { ...params, ...body };
+    }
+    if (params.button) {
+      const want = String(params.button).toLowerCase();
+      const rule = store.config.rules.find((r) => r.enabled && r.trigger.type === 'button' && (r.id === params.button || r.name.toLowerCase() === want));
+      if (!rule) return sendJson(res, 404, { error: 'Không có nút bấm tay nào tên như vậy' });
+      engine.fireRule(rule.id, {});
+      return sendJson(res, 200, { ok: true });
+    }
+    const ev = hookEvent(params);
+    if (!ev) return sendJson(res, 400, { error: `type phải là một trong: ${HOOK_TYPES.join(', ')}; hoặc dùng button=<tên nút>` });
+    ingest(ev);
+    return sendJson(res, 200, { ok: true });
   }
 
   const server = http.createServer((req, res) => {
@@ -280,13 +462,20 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     } catch {
       return sendJson(res, 400, { error: 'bad request' });
     }
-    const p = decodeURIComponent(url.pathname);
+    let p;
+    try { p = decodeURIComponent(url.pathname); } catch { return sendJson(res, 400, { error: 'bad request' }); }
+    const fail = (err) => {
+      if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message || 'Lỗi máy chủ' });
+    };
 
     if (p.startsWith('/api/')) {
       if (!trusted(req)) return sendJson(res, 403, { error: 'forbidden' });
-      return api(req, res, url).catch((err) => {
-        if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message || 'Lỗi máy chủ' });
-      });
+      return api(req, res, url).catch(fail);
+    }
+    if (p.startsWith('/hook/')) {
+      if (!allowedHosts().has(req.headers.host)) return sendJson(res, 403, { error: 'forbidden' });
+      if (req.method !== 'GET' && req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' });
+      return hook(req, res, url, p.slice('/hook/'.length)).catch(fail);
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
 
@@ -298,6 +487,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     if (p === '/overlay' || p === '/overlay/') return serveFile(res, PUBLIC_DIR, 'overlay/index.html');
     if (p.startsWith('/panel/') || p.startsWith('/overlay/') || p.startsWith('/remote/')) return serveFile(res, PUBLIC_DIR, p.slice(1));
     if (p.startsWith('/media/')) return serveFile(res, store.mediaDir, p.slice('/media/'.length));
+    if (p.startsWith('/thumb/')) return serveThumb(res, p.slice('/thumb/'.length));
     return sendJson(res, 404, { error: 'not found' });
   });
 
@@ -328,6 +518,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (client.role === 'overlay') {
         ws.send(JSON.stringify(widgetsMsg()));
         ws.send(JSON.stringify(engine.goalState()));
+        ws.send(JSON.stringify(engine.topState()));
       } else {
         ws.send(JSON.stringify(statusMsg()));
       }
@@ -368,6 +559,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     tryListen();
   });
 
+  await refreshQr();
+  syncSepay();
   await remote.sync();
 
   return {
@@ -384,6 +577,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     },
     async close() {
       clearInterval(heartbeat);
+      sepay.stop();
+      twitch.disconnect();
       await remote.close();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();

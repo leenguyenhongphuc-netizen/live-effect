@@ -1,8 +1,11 @@
 // Bộ máy kịch bản: nhận sự kiện đã chuẩn hoá (follow, gift, like...) và quyết định
 // kịch bản nào chạy. Không phụ thuộc mạng hay Electron nên kiểm thử được độc lập.
 
+import { formatVnd } from './donate.js';
+
 const fill = (tpl, ctx) =>
-  String(tpl || '').replace(/\{(\w+)\}/g, (m, key) => (ctx[key] !== undefined && ctx[key] !== null ? String(ctx[key]) : m));
+  String(tpl || '').replace(/\{(\w+)\}/g, (m, key) => (ctx[key] !== undefined && ctx[key] !== null ? String(ctx[key]) : m))
+    .replace(/\s+/g, ' ').trim();
 
 export class Engine {
   /**
@@ -17,15 +20,25 @@ export class Engine {
     this.lastFired = new Map(); // ruleId -> thời điểm chạy gần nhất
     this.likeBank = new Map(); // ruleId -> số tim đang dồn
     this.followed = new Set(); // người đã follow trong phiên, tránh lặp
-    this.goal = { likes: 0, coins: 0, follows: 0 };
+    this.goal = { likes: 0, coins: 0, follows: 0, donate: 0 };
+    this.gifters = new Map(); // người tặng -> { name, avatar, coins } trong phiên
   }
 
   resetSession() {
     this.lastFired.clear();
     this.likeBank.clear();
     this.followed.clear();
-    this.goal = { likes: 0, coins: 0, follows: 0 };
+    this.goal = { likes: 0, coins: 0, follows: 0, donate: 0 };
+    this.gifters.clear();
     this.#emitGoal();
+    this.emit(this.topState());
+  }
+
+  /** Bảng xếp hạng người tặng quà nhiều nhất trong phiên. */
+  topState() {
+    const max = this.getConfig().widgets.top.max;
+    const rows = [...this.gifters.values()].sort((a, b) => b.coins - a.coins).slice(0, max);
+    return { type: 'top', rows };
   }
 
   goalState() {
@@ -38,9 +51,10 @@ export class Engine {
   }
 
   context(ev) {
-    const user = ev.nickname || ev.user || 'Ai đó';
+    const user = ev.nickname || ev.user || (ev.type === 'donate' ? 'Một bạn' : 'Ai đó');
     return {
       user,
+      amount: formatVnd(ev.amount || 0),
       gift: ev.giftName || 'quà',
       count: ev.count || 1,
       coins: ev.coins || 0,
@@ -87,6 +101,8 @@ export class Engine {
         else if (t.giftName && t.giftName.toLowerCase() !== String(ev.giftName || '').toLowerCase()) return false;
         return (ev.coins || 0) >= t.minCoins;
       }
+      case 'donate':
+        return (ev.amount || 0) >= (t.minAmount || 0);
       case 'chat': {
         // Không có từ khoá thì không chạy, tránh mọi bình luận đều kích hiệu ứng.
         if (!t.keyword) return false;
@@ -120,11 +136,21 @@ export class Engine {
       this.goal.follows += 1;
     } else if (ev.type === 'gift') {
       this.goal.coins += ev.coins || 0;
+      const key = ev.user || ev.nickname;
+      if (key && ev.coins > 0) {
+        const row = this.gifters.get(key) || { name: ev.nickname || ev.user, avatar: ev.avatar || '', coins: 0 };
+        row.coins += ev.coins;
+        if (ev.avatar) row.avatar = ev.avatar;
+        this.gifters.set(key, row);
+        this.emit(this.topState());
+      }
+    } else if (ev.type === 'donate') {
+      this.goal.donate += ev.amount || 0;
     } else if (ev.type === 'like') {
       // TikTok gửi kèm tổng tim của phiên; nếu có thì tin số đó hơn số tự cộng.
       this.goal.likes = ev.totalLikes > this.goal.likes ? ev.totalLikes : this.goal.likes + (ev.likeCount || 1);
     }
-    if (['follow', 'gift', 'like'].includes(ev.type)) this.#emitGoal();
+    if (['follow', 'gift', 'like', 'donate'].includes(ev.type)) this.#emitGoal();
 
     if (ev.type === 'chat' && cfg.widgets.chat.enabled) {
       this.emit({ type: 'chat', user: ev.nickname || ev.user || '', text: ev.text || '', avatar: ev.avatar || '' });

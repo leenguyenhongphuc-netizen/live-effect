@@ -96,8 +96,9 @@ try {
   await desk.click('.rule >> nth=1 >> text=Sửa');
   await desk.screenshot({ path: path.join(shots, '04-kich-ban.png') });
   await checkLayout(desk, 'Kịch bản (đang sửa)');
+  const rulesBefore = await desk.locator('.rule').count();
   await desk.click('text=Thêm kịch bản');
-  await desk.waitForFunction(() => document.querySelectorAll('.rule').length === 8);
+  await desk.waitForFunction((n) => document.querySelectorAll('.rule').length === n + 1, rulesBefore);
   const before = await desk.locator('.rule').count();
   await desk.locator('.rule-edit select').first().selectOption('join');
   await desk.locator('.rule-edit input[placeholder^="Bỏ trống = tất cả"]').fill('anhca0811');
@@ -105,7 +106,7 @@ try {
   note((await desk.locator('.rule').last().locator('.rule-text span').textContent()) !== '', 'Kịch bản mới: có câu mô tả');
   await desk.click('text=Xong');
   note((await desk.locator('.rule').last().textContent()).includes('@anhca0811 vào phòng'), 'Kịch bản riêng cho một user hiện đúng mô tả');
-  note(before === 8, `Thêm kịch bản: danh sách có ${before} kịch bản`);
+  note(before === rulesBefore + 1, `Thêm kịch bản: danh sách tăng từ ${rulesBefore} lên ${before} kịch bản`);
 
   // Hiển thị: thêm video nền đen, tạo nút một lần bấm.
   const clip = path.join(dataDir, 'rong lua.webm');
@@ -212,7 +213,9 @@ try {
   await phone.goto(remoteUrl);
   await phone.waitForSelector('.key');
   note(!phone.url().includes('k='), 'Điện thoại: mã ghép nối được xoá khỏi thanh địa chỉ');
-  note(await phone.locator('.key.mine').count() === 3 && await phone.locator('#celebrate').count() === 1, `Điện thoại: thấy ${await phone.locator('.key.mine').count()} nút riêng (2 mặc định + nút video vừa tạo)`);
+  const mineNames = await phone.locator('.key.mine').allTextContents();
+  note(['Ăn mừng', 'Cảm ơn cả nhà', 'rong lua'].every((n) => mineNames.some((x) => x.includes(n))) && await phone.locator('#celebrate').count() === 1,
+    `Điện thoại: thấy các nút riêng (${mineNames.join(' | ')}) và công tắc chúc mừng quà`);
   await checkLayout(phone, 'Điện thoại (390px)');
   await phone.screenshot({ path: path.join(shots, '10-phone.png') });
   await phone.tap('.key.mine >> text=Ăn mừng');

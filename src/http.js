@@ -9,6 +9,8 @@ const MIME = {
   html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8',
   svg: 'image/svg+xml', json: 'application/json; charset=utf-8', png: 'image/png', jpg: 'image/jpeg',
   jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', webm: 'video/webm', mp4: 'video/mp4',
+  webmanifest: 'application/manifest+json; charset=utf-8',
+  mov: 'video/mp4', // video quay bằng iPhone: cùng họ với MP4, trình duyệt phát được khi là H.264
   mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', ico: 'image/x-icon',
 };
 
@@ -33,6 +35,37 @@ export function readBody(req, limit) {
     });
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
+  });
+}
+
+/** Ghi thẳng thân yêu cầu xuống đĩa (video lớn không nằm trong bộ nhớ). Trả về số byte. */
+export function saveBody(req, file, limit) {
+  return new Promise((resolve, reject) => {
+    const tmp = `${file}.part`;
+    const out = fs.createWriteStream(tmp);
+    let size = 0;
+    let failed = false;
+    const abort = (err) => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(out);
+      req.resume(); // đọc bỏ phần còn lại để vẫn trả lời được cho bên gửi
+      out.destroy();
+      fs.rm(tmp, { force: true }, () => reject(err));
+    };
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) abort(Object.assign(new Error('too large'), { status: 413 }));
+    });
+    req.on('error', abort);
+    req.on('aborted', () => abort(Object.assign(new Error('aborted'), { status: 400 })));
+    out.on('error', abort);
+    out.on('finish', () => {
+      if (failed) return;
+      if (!size) { abort(Object.assign(new Error('empty'), { status: 400 })); return; }
+      fs.rename(tmp, file, (err) => (err ? abort(err) : resolve(size)));
+    });
+    req.pipe(out);
   });
 }
 

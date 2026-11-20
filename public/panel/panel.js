@@ -3,6 +3,7 @@
 
 import { icon } from '/remote/icons.js';
 import { AudioReactive, listInputs } from '/panel/audio.js';
+import { makeThumb } from '/remote/thumb.js';
 
 /** Dựng phần tử: h('div.card', { onclick }, con1, con2). Chuỗi luôn thành text, không bao giờ là HTML. */
 function h(spec, props, ...kids) {
@@ -23,9 +24,10 @@ function h(spec, props, ...kids) {
 }
 
 const S = {
-  config: null, status: null, media: [], gifts: [], giftQuery: '', catalog: null, overlayUrl: '', capabilities: {}, log: [], remote: null,
-  view: 'home', openRule: null, guide: 'obs', intensity: 2,
+  config: null, status: null, media: [], gifts: [], giftQuery: '', catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
+  view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
+const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
 const main = document.getElementById('main');
 const nf = new Intl.NumberFormat('vi-VN');
 const nameOf = (list, id, fallback = '') => list.find((x) => x.id === id)?.name || fallback;
@@ -60,7 +62,9 @@ function save() {
     try {
       const out = await api('PUT', '/api/config', S.config);
       if (out.remote) S.remote = out.remote;
-      if (S.view === 'phone') render();
+      const hookChanged = out.hookUrl !== undefined && out.hookUrl !== S.hookUrl;
+      if (hookChanged) S.hookUrl = out.hookUrl;
+      if (S.view === 'phone' || (hookChanged && S.view === 'donate')) render();
     } catch (err) {
       toast(`Chưa lưu được: ${err.message}`);
     } finally {
@@ -116,6 +120,20 @@ function seg(options, current, onpick, label) {
 function head(title, sub, extra) {
   return h('div.view-head', null, h('div', null, h('h1', null, title), sub && h('p', null, sub)), extra);
 }
+function copyField(value, label, done) {
+  const input = h('input.input', { type: 'text', readOnly: true, value, 'aria-label': label, onfocus: (e) => e.target.select() });
+  const btn = h('button.btn', { type: 'button', onclick: async () => {
+    try { await navigator.clipboard.writeText(value); } catch { input.select(); document.execCommand('copy'); }
+    toast(done);
+  } }, icon('copy'), 'Sao chép');
+  return h('div.row', null, h('div.field', null, input), btn);
+}
+/** Ảnh thu nhỏ của một tệp trong thư viện; chưa có ảnh thì hiện biểu tượng. */
+function thumbOrIcon(name, size = 26) {
+  const img = h('img.thumb', { alt: '', loading: 'lazy', src: `/thumb/${encodeURIComponent(name)}?v=${S.thumbStamp}` });
+  img.onerror = () => img.replaceWith(icon('film', size));
+  return img;
+}
 
 // --- Mục: Bắt đầu -----------------------------------------------------------
 const GUIDES = {
@@ -154,12 +172,29 @@ function viewHome() {
   const [, lines] = GUIDES[S.guide];
   const rich = (parts) => parts.map((p) => (Array.isArray(p) ? h(p[0], null, p[1]) : p));
 
+  // OBS: thêm nguồn giúp người dùng qua WebSocket có sẵn của OBS, khỏi dán link bằng tay.
+  const addObs = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      S.obs = await api('POST', '/api/obs/add');
+      if (S.obs.ok) toast(S.obs.created ? `Đã thêm nguồn “Live Effect” vào cảnh “${S.obs.scene}”` : 'Nguồn “Live Effect” đã có trong OBS, đã cập nhật link');
+    } catch (err) { S.obs = { ok: false, error: err.message }; }
+    render();
+  };
+  const obsAuto = S.guide === 'obs' && !linked ? h('div.auto-obs', null,
+    h('button.btn.primary', { type: 'button', onclick: addObs }, icon('plus'), 'Tự thêm vào OBS giúp tôi'),
+    h('span.small.muted', null, 'OBS đang mở và đã bật WebSocket thì một lần bấm là xong. Không được thì làm tay theo các bước dưới.'),
+    S.obs && !S.obs.ok ? h('p.note.err', { role: 'status' }, S.obs.error) : null,
+    S.obs?.ok ? h('p.note.ok', { role: 'status' }, `Đã gắn vào cảnh “${S.obs.scene}” (${S.obs.width} × ${S.obs.height}). Kéo nguồn “Live Effect” lên trên cùng nếu nó bị che.`) : null) : null;
+
   const step1 = h('section.card.step', null,
     h(`div.step-num${linked ? '.done' : ''}`, { 'aria-hidden': 'true' }, '1'),
     h('h2', null, 'Dán link overlay vào phần mềm live'),
     h('div.step-body', null,
       h('div.row', null, h('div.field', null, url), copy),
       seg(Object.entries(GUIDES).map(([k, v]) => [k, v[0]]), S.guide, (v) => { S.guide = v; render(); }, 'Phần mềm live'),
+      obsAuto,
       h('ol.steps-list', null, lines.map((l) => h('li', null, rich(l)))),
       h(`p.note${linked ? '.ok' : ''}`, null, linked
         ? `Đã có ${st.overlays} nguồn đang mở overlay. Hiệu ứng sẽ lên sóng.`
@@ -194,13 +229,14 @@ function viewHome() {
       tk.detail && !connected ? h('details.adv', null,
         h('summary', null, 'Chi tiết kỹ thuật (gửi kèm khi cần hỗ trợ)'),
         h('p.small.muted.mono', null, tk.detail)) : null,
-      h('p.small.muted', null, 'Stream game trên YouTube, Facebook hay Twitch? Bỏ qua bước này, dùng nút bấm trên điện thoại hoặc phím tắt để bật hiệu ứng.'),
+      h('p.small.muted', null, 'Stream game trên YouTube hay Facebook? Bỏ qua bước này, dùng nút bấm trên điện thoại hoặc phím tắt để bật hiệu ứng.'),
+      twitchBox(),
       h('details.adv', null,
         h('summary', null, 'Nâng cao: khoá Euler Stream'),
         field('Khoá API (không bắt buộc)', textInput(S.config.tiktok, 'signApiKey', { type: 'password', placeholder: 'Bỏ trống nếu chưa cần' }),
           'Kết nối TikTok đi qua dịch vụ ký Euler Stream, bản miễn phí có giới hạn lượt. Nếu hay bị báo giới hạn, tạo khoá tại eulerstream.com rồi dán vào đây.'))));
 
-  const sims = [['follow', 'Follow'], ['gift', 'Quà nhỏ'], ['biggift', 'Quà lớn'], ['like', '100 tim'], ['share', 'Chia sẻ'], ['chat', 'Bình luận']];
+  const sims = [['follow', 'Follow'], ['gift', 'Quà nhỏ'], ['biggift', 'Quà lớn'], ['like', '100 tim'], ['share', 'Chia sẻ'], ['chat', 'Bình luận'], ['donate', 'Ủng hộ 50.000đ']];
   const step3 = h('section.card.step', null,
     h('div.step-num', { 'aria-hidden': 'true' }, '3'),
     h('h2', null, 'Thử trước khi lên sóng'),
@@ -212,6 +248,32 @@ function viewHome() {
   return h('div.view', null,
     head('Bắt đầu trong 3 bước', 'Live Effect chạy song song với OBS, TikTok LIVE Studio và mọi phần mềm live có nguồn trình duyệt.'),
     step1, step2, step3);
+}
+
+// Chat Twitch cho stream game: chỉ cần tên kênh, không đăng nhập.
+function twitchBox() {
+  const tw = S.status.twitch || { state: 'idle' };
+  const on = tw.state === 'connected' || tw.state === 'connecting';
+  const input = h('input.input', {
+    type: 'text', value: S.config.twitch.channel, placeholder: 'Tên kênh Twitch, ví dụ: ten_kenh', autocomplete: 'off', spellcheck: false,
+    'aria-label': 'Tên kênh Twitch', disabled: on,
+    oninput: (e) => { S.config.twitch.channel = e.target.value.trim().toLowerCase(); save(); },
+    onkeydown: (e) => { if (e.key === 'Enter') go(); },
+  });
+  const go = () => {
+    if (!S.config.twitch.channel) { toast('Hãy nhập tên kênh Twitch'); input.focus(); return; }
+    act('/api/twitch/connect', { channel: S.config.twitch.channel });
+  };
+  const note = tw.state === 'connected' ? ['ok', `Đang đọc chat kênh ${tw.channel}. Bình luận có từ khoá, Bits và Sub sẽ kích hiệu ứng.`]
+    : tw.state === 'connecting' ? ['', tw.error || 'Đang nối chat Twitch…']
+      : tw.error ? ['err', tw.error] : null;
+  return h('details.adv', { open: on || Boolean(tw.error) },
+    h('summary', null, 'Stream game trên Twitch: đọc chat để kích hiệu ứng'),
+    h('div.row', null, h('div.field', null, input),
+      on ? h('button.btn', { type: 'button', onclick: () => act('/api/twitch/disconnect') }, 'Ngắt')
+        : h('button.btn', { type: 'button', onclick: go }, 'Kết nối')),
+    note ? h(`p.note${note[0] ? `.${note[0]}` : ''}`, { role: 'status' }, note[1]) : null,
+    h('p.small.muted', null, 'Bits tính như quà tên “Bits” (1 bit = 1 xu), Sub tính như quà tên “Sub”. Đặt kịch bản theo tên quà đó.'));
 }
 
 // --- Mục: Bảng hiệu ứng -----------------------------------------------------
@@ -234,7 +296,7 @@ function viewDeck() {
       h('h2', null, 'Video và hình của bạn'),
       visuals.length
         ? h('div.tiles', null, visuals.map((m) =>
-          h('button.tile.media', { type: 'button', title: m, onclick: () => fire({ media: m }) }, icon('film'), h('span', null, m))))
+          h('button.tile.media', { type: 'button', title: m, onclick: () => fire({ media: m }) }, thumbOrIcon(m), h('span', null, m))))
         : h('p.muted', null, 'Chưa có tệp nào. Vào mục Hiển thị để thêm video hiệu ứng, ảnh GIF hoặc âm thanh của riêng bạn.')));
 }
 
@@ -249,6 +311,7 @@ function describe(rule) {
     share: `Khi có người chia sẻ${who}`,
     chat: t.keyword ? `Khi bình luận có “${t.keyword}”${who}` : 'Khi bình luận có từ khoá (chưa đặt từ khoá)',
     join: t.user ? `Khi @${t.user} vào phòng` : 'Khi có người vào xem',
+    donate: `Khi có người ủng hộ${t.minAmount ? ` từ ${fmtVnd(t.minAmount)}` : ''}`,
     button: t.hotkey ? `Nút bấm tay · phím ${t.hotkey}` : 'Nút bấm tay trên điện thoại',
   }[t.type];
   const a = rule.action;
@@ -311,6 +374,10 @@ function ruleEditor(rule) {
     }
     cond.push(field('Tổng giá trị từ (xu)', numInput(t, 'minCoins', { max: 1e6 })));
   }
+  if (t.type === 'donate') {
+    cond.push(field('Số tiền từ (đồng)', numInput(t, 'minAmount', { max: 1e9, step: 1000 }),
+      'Ví dụ 50000 để chỉ chạy với khoản từ 50.000đ. Bật nhận chuyển khoản ở mục Ủng hộ.'));
+  }
   if (t.type === 'like') cond.push(field('Cứ mỗi bao nhiêu tim', numInput(t, 'every', { min: 1, max: 1e6 })));
   if (t.type === 'chat') cond.push(field('Từ khoá trong bình luận', textInput(t, 'keyword', { placeholder: 'Ví dụ: !phaohoa' })));
   if (['gift', 'join', 'follow', 'share', 'chat'].includes(t.type)) {
@@ -343,7 +410,9 @@ function ruleEditor(rule) {
         'Dùng khi video hiệu ứng có nền đen hoặc nền xanh, để vẫn thấy hình live phía sau.')) : null,
     toggle(a, 'alert', 'Hiện dòng thông báo', render),
     a.alert ? field('Nội dung thông báo', textInput(a, 'text', { placeholder: 'Cảm ơn {user}!' }),
-      'Chèn được: {user} tên người xem · {gift} tên quà · {count} số lượng · {coins} số xu') : null,
+      t.type === 'donate'
+        ? 'Chèn được: {user} tên người ủng hộ · {amount} số tiền · {text} lời nhắn'
+        : 'Chèn được: {user} tên người xem · {gift} tên quà · {count} số lượng · {coins} số xu') : null,
     h('div.rule-foot', null,
       h('div.row', null, field('Nghỉ giữa hai lần chạy (giây)', numInput(rule, 'cooldown', { max: 3600 }))),
       h('button.btn.danger', { type: 'button', onclick: () => {
@@ -546,9 +615,62 @@ function viewPhone() {
         h('button.btn', { type: 'button', onclick: () => { S.view = 'rules'; render(); } }, 'Sửa nút')),
       buttons.length
         ? h('div.tiles', null, buttons.map((b) => h('button.tile', { type: 'button', disabled: !b.enabled, onclick: () => act('/api/test', { ruleId: b.id }) },
-          icon(b.action.media ? 'film' : b.action.effect !== 'none' ? b.action.effect : 'volume', 26), b.name)))
+          b.action.media ? thumbOrIcon(b.action.media) : icon(b.action.effect !== 'none' ? b.action.effect : 'volume', 26), b.name)))
         : h('p.muted', null, 'Chưa có nút nào. Vào Kịch bản, thêm kịch bản với sự kiện “Nút bấm tay”.'),
-      h('p.small.muted', null, 'Ngoài các nút này, điện thoại luôn có sẵn 8 hiệu ứng nhanh và nút dừng tất cả.')));
+      h('p.small.muted', null, 'Ngoài các nút này, điện thoại luôn có sẵn 8 hiệu ứng nhanh và nút dừng tất cả. Trên điện thoại, bấm “Thêm video từ máy này” để đưa một video trong thư viện ảnh lên thành nút mới.')));
+}
+
+// --- Mục: Ủng hộ ------------------------------------------------------------
+function viewDonate() {
+  const dn = S.config.donate;
+  const w = S.config.widgets;
+  const hk = S.config.hook;
+  const st = S.status.donate || { state: 'idle' };
+  const ready = Boolean(dn.bank && dn.account);
+  const corners = [['bottom-right', 'Dưới, bên phải'], ['bottom-left', 'Dưới, bên trái'], ['top-right', 'Trên, bên phải'], ['top-left', 'Trên, bên trái']];
+
+  const sepayNote = !dn.enabled ? null
+    : !dn.sepayToken ? ['', 'Dán API Token của SePay vào ô trên để bắt đầu.']
+      : st.state === 'connected' ? ['ok', 'Đang theo dõi tài khoản. Có tiền vào là hiệu ứng chạy sau vài giây.']
+        : st.state === 'error' ? ['err', st.error] : ['', 'Đang nối với SePay…'];
+
+  return h('div.view', null,
+    head('Ủng hộ qua chuyển khoản', 'Khán giả quét mã QR ngân hàng trên sóng, tiền vào thẳng tài khoản của bạn, hiệu ứng tự chạy. Live Effect không giữ tiền và không thu phí.'),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, '1. Mã QR trên khung hình'), toggle(w.qr, 'enabled', w.qr.enabled ? 'Đang hiện' : 'Đang ẩn', render)),
+      h('div.grid2', null,
+        field('Ngân hàng', select(dn, 'bank', [['', 'Chọn ngân hàng'], ...S.catalog.banks.map((b) => [b.bin, b.name])], render)),
+        field('Số tài khoản', textInput(dn, 'account', { inputMode: 'numeric', placeholder: 'Chỉ gồm chữ và số' })),
+        field('Tên chủ tài khoản (hiện dưới mã)', textInput(dn, 'holder', { placeholder: 'NGUYEN VAN A' })),
+        field('Nội dung chuyển khoản gợi ý', textInput(dn, 'memo', { placeholder: 'Ung ho' }), 'Khán giả sửa được thành lời nhắn của họ. Không dấu.')),
+      h('div.grid2', null,
+        field('Dòng chữ trên mã', textInput(w.qr, 'title')),
+        field('Vị trí', select(w.qr, 'position', corners))),
+      h(`p.note${ready ? '' : '.err'}`, null, ready
+        ? 'Mã QR được tạo ngay trên máy này theo chuẩn VietQR. Hãy tự quét thử bằng app ngân hàng và kiểm tra tên người nhận trước khi lên sóng.'
+        : 'Chọn ngân hàng và nhập số tài khoản để có mã QR.'),
+      h('p.small.muted', null, 'Lưu ý: TikTok có thể hạn chế việc đưa mã nhận tiền lên live. Bạn tự cân nhắc theo quy định của nền tảng mình đang live.')),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, '2. Tự nhận biết khi có tiền vào'), toggle(dn, 'enabled', dn.enabled ? 'Đang bật' : 'Đang tắt', render)),
+      h('p.muted', null, 'Live Effect hỏi SePay vài giây một lần xem tài khoản có tiền vào không. SePay là dịch vụ báo biến động số dư, có gói miễn phí.'),
+      h('ol.steps-list', null,
+        h('li', null, 'Tạo tài khoản tại ', h('b', null, 'sepay.vn'), ' và thêm tài khoản ngân hàng ở bước 1 vào đó.'),
+        h('li', null, 'Trong SePay vào ', h('b', null, 'Cấu hình công ty → API Access'), ', tạo một API Token.'),
+        h('li', null, 'Dán token vào ô dưới đây rồi bật công tắc.')),
+      field('API Token của SePay', textInput(dn, 'sepayToken', { type: 'password', placeholder: 'Dán token vào đây' }),
+        'Token chỉ lưu trên máy này và chỉ gửi tới my.sepay.vn.'),
+      sepayNote ? h(`p.note${sepayNote[0] ? `.${sepayNote[0]}` : ''}`, { role: 'status' }, sepayNote[1]) : null,
+      h('div.btn-row', null,
+        h('button.btn', { type: 'button', onclick: () => act('/api/simulate', { type: 'donate' }) }, icon('play'), 'Thử một lượt ủng hộ 50.000đ'),
+        h('button.btn.ghost', { type: 'button', onclick: () => { S.view = 'rules'; S.openRule = S.config.rules.find((r) => r.trigger.type === 'donate')?.id || null; render(); } }, 'Sửa hiệu ứng khi có ủng hộ'))),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Nguồn khác: link nhận sự kiện'), toggle(hk, 'enabled', hk.enabled ? 'Đang bật' : 'Đang tắt', render)),
+      h('p.muted', null, 'Dành cho quà hay donate từ bất kỳ đâu: Streamer.bot, Stream Deck, công cụ donate khác hoặc script của bạn gọi link này là hiệu ứng chạy. Link chỉ dùng được trên chính máy này.'),
+      hk.enabled && S.hookUrl ? [
+        field('Báo một lượt ủng hộ', copyField(`${S.hookUrl}?type=donate&name=An&amount=50000&text=Co%20len`, 'Link báo ủng hộ', 'Đã sao chép link')),
+        field('Bấm một nút bấm tay theo tên', copyField(`${S.hookUrl}?button=${encodeURIComponent(S.config.rules.find((r) => r.trigger.type === 'button')?.name || 'Ăn mừng')}`, 'Link bấm nút', 'Đã sao chép link')),
+        h('p.small.muted', null, 'type nhận: donate, gift, follow, share, chat, like, join. Tham số: name, amount (đồng), coins, gift, count, text. Đừng đưa link này cho người khác.'),
+      ] : hk.enabled ? h('p.muted', null, 'Đang tạo link…') : null));
 }
 
 // Tạo ngay một "Nút bấm tay" phát video/hình này toàn màn hình: hiện trên điện thoại liền.
@@ -574,9 +696,16 @@ function viewDisplay() {
       for (const file of e.target.files) {
         try {
           toast(`Đang thêm ${file.name}…`);
-          S.media = (await api('POST', `/api/media?name=${encodeURIComponent(file.name)}`, file, true)).media;
+          const out = await api('POST', `/api/media?name=${encodeURIComponent(file.name)}`, file, true);
+          S.media = out.media;
+          // Ảnh thu nhỏ để nút trên điện thoại và bảng hiệu ứng dễ nhận ra.
+          if (out.kind !== 'audio') {
+            const blob = await makeThumb(file);
+            if (blob) await api('POST', `/api/thumb?name=${encodeURIComponent(out.name)}`, blob, true).catch(() => {});
+          }
         } catch (err) { toast(`${file.name}: ${err.message}`); }
       }
+      S.thumbStamp = Date.now();
       e.target.value = '';
       render();
     } });
@@ -591,7 +720,7 @@ function viewDisplay() {
       h('div.card-head', null, h('h2', null, 'Thư viện video, hình, âm thanh'),
         h('button.btn.primary', { type: 'button', onclick: () => upload.click() }, icon('upload'), 'Thêm tệp')),
       upload,
-      h('p.small.muted', null, 'Video hiệu ứng: WebM trong suốt, hoặc MP4 nền đen / nền xanh (bật “Xoá nền video” trong kịch bản). Tối đa 80 MB mỗi tệp.'),
+      h('p.small.muted', null, 'Video hiệu ứng: WebM trong suốt, hoặc MP4 nền đen / nền xanh (bật “Xoá nền video” trong kịch bản). Tối đa 300 MB mỗi tệp.'),
       S.media.length ? h('div.media-list', null, S.media.map((m) => h('div.media-item', null,
         h('span', null, m, h('em', null, kind(m))),
         h('div.btn-row', null, kind(m) !== 'Âm thanh' && h('button.btn', { type: 'button', onclick: () => makeButton(m) }, icon('plus'), 'Tạo nút'),
@@ -610,23 +739,31 @@ function viewDisplay() {
       h('div.card-head', null, h('h2', null, 'Thanh mục tiêu'), toggle(w.goal, 'enabled')),
       h('div.grid2', null,
         field('Tiêu đề', textInput(w.goal, 'title')),
-        field('Đếm theo', select(w.goal, 'type', [['likes', 'Số tim'], ['coins', 'Số xu quà tặng'], ['follows', 'Số follow mới']])),
+        field('Đếm theo', select(w.goal, 'type', [['likes', 'Số tim'], ['coins', 'Số xu quà tặng'], ['follows', 'Số follow mới'], ['donate', 'Tiền ủng hộ (đồng)']])),
         field('Mục tiêu', numInput(w.goal, 'target', { min: 1 })),
         field('Vị trí', select(w.goal, 'position', [['top', 'Phía trên'], ['bottom', 'Phía dưới']]))),
       h('div.btn-row', null, h('button.btn.ghost', { type: 'button', onclick: () => act('/api/goal/reset').then(() => toast('Đã đặt lại về 0')) }, 'Đặt lại về 0'))),
     h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Bảng top tặng quà'), toggle(w.top, 'enabled')),
+      h('p.small.muted', null, 'Xếp hạng người tặng nhiều xu nhất trong phiên live, cập nhật theo từng món quà.'),
+      h('div.grid3', null,
+        field('Tiêu đề', textInput(w.top, 'title')),
+        field('Số người hiện', numInput(w.top, 'max', { min: 1, max: 10 })),
+        field('Vị trí', select(w.top, 'position', [['top-left', 'Trên, bên trái'], ['top-right', 'Trên, bên phải'], ['bottom-left', 'Dưới, bên trái'], ['bottom-right', 'Dưới, bên phải']])))),
+    h('section.card', null,
       h('div.card-head', null, h('h2', null, 'Giọng đọc tự động'), toggle(tts, 'enabled')),
       h('p.small.muted', null, 'Giọng đọc phát qua loa máy tính, OBS thu lại bằng nguồn âm thanh màn hình. Giọng tiếng Việt cần cài trong Windows: Cài đặt → Thời gian & ngôn ngữ → Giọng nói.'),
-      h('div.btn-row', null, toggle(tts, 'chat', 'Đọc bình luận'), toggle(tts, 'gift', 'Cảm ơn quà tặng'), toggle(tts, 'follow', 'Cảm ơn follow')),
+      h('div.btn-row', null, toggle(tts, 'chat', 'Đọc bình luận'), toggle(tts, 'gift', 'Cảm ơn quà tặng'), toggle(tts, 'follow', 'Cảm ơn follow'), toggle(tts, 'donate', 'Đọc lời nhắn ủng hộ')),
       h('div.grid2', null,
         field('Giọng đọc', select(tts, 'voice', [['', 'Mặc định của máy'], ...voices.map((v) => [v.name, `${v.name} (${v.lang})`])])),
         field('Tốc độ', numInput(tts, 'rate', { min: 0.5, max: 2, step: 0.1 })))));
 }
 
 // --- Mục: Nhật ký -----------------------------------------------------------
-const KIND = { follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem' };
+const KIND = { follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
 function logRow(e) {
   const what = {
+    donate: `ủng hộ ${fmtVnd(e.amount)}${e.text ? `: ${e.text}` : ''}`,
     gift: `tặng ${e.count || 1} ${e.giftName || 'quà'}${e.coins ? ` (${e.coins} xu)` : ''}`,
     like: `thả ${e.likeCount || 1} tim`,
     chat: e.text,
@@ -655,6 +792,7 @@ const VIEWS = [
   ['gifts', 'Quà tặng', 'giftrain', viewGifts],
   ['music', 'Nhạc và nhịp', 'music', viewMusic],
   ['phone', 'Điện thoại', 'phone', viewPhone],
+  ['donate', 'Ủng hộ', 'donate', viewDonate],
   ['display', 'Hiển thị', 'layout', viewDisplay],
   ['log', 'Nhật ký', 'log', viewLog],
 ];
@@ -672,9 +810,14 @@ function renderStatus() {
     : tk.state === 'connecting' ? ['Đang kết nối TikTok…']
       : tk.state === 'waiting' ? ['Đang chờ ', h('b', null, `@${tk.username}`), ' lên sóng…']
       : tk.state === 'error' ? ['TikTok: lỗi kết nối'] : ['TikTok: chưa kết nối'];
-  document.getElementById('side-status').replaceChildren(
+  document.getElementById('side-status').replaceChildren(...[
     h('div.stat', null, h(`span.dot${dot ? `.${dot}` : ''}`), h('span', null, line)),
-    h('div.stat', null, h(`span.dot${overlays ? '.ok' : ''}`), h('span', null, overlays ? `Overlay: ${overlays} nguồn đang mở` : 'Overlay: chưa mở ở đâu')));
+    h('div.stat', null, h(`span.dot${overlays ? '.ok' : ''}`), h('span', null, overlays ? `Overlay: ${overlays} nguồn đang mở` : 'Overlay: chưa mở ở đâu')),
+    S.status.twitch?.state === 'connected' ? h('div.stat', null, h('span.dot.ok'), h('span', null, `Twitch: ${S.status.twitch.channel}`)) : null,
+    S.config.donate.enabled && S.config.donate.sepayToken ? h('div.stat', null,
+      h(`span.dot${{ connected: '.ok', connecting: '.wait', error: '.err' }[S.status.donate?.state] || ''}`),
+      h('span', null, S.status.donate?.state === 'connected' ? 'Chuyển khoản: đang theo dõi' : S.status.donate?.state === 'error' ? 'Chuyển khoản: lỗi SePay' : 'Chuyển khoản: đang nối…')) : null,
+  ].filter(Boolean));
 }
 
 function render() {
