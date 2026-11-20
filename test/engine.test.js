@@ -1,4 +1,6 @@
 import test from 'node:test';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { Engine } from '../src/engine.js';
 import { defaultConfig, sanitizeConfig, safeMediaName } from '../src/defaults.js';
@@ -207,7 +209,7 @@ test('quà có hiệu ứng riêng thì không chạy thêm hiệu ứng chung; 
 });
 
 test('danh mục quà: chuẩn hoá dữ liệu TikTok, gộp không mất thông tin, bù tên cho tin nhắn quà', () => {
-  const file = `${process.env.TMPDIR || '/tmp'}/gifts-${process.pid}-${Date.now()}.json`;
+  const file = path.join(os.tmpdir(), `gifts-${process.pid}-${Date.now()}.json`);
   const cat = new GiftCatalog(file);
   assert.equal(normalizeCatalogGift({ name: 'thiếu mã' }), null);
   assert.equal(cat.merge([
