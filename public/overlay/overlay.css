@@ -180,3 +180,24 @@ html, body {
 #xbest .who { display: flex; flex-direction: column; min-width: 0; }
 #xbest .who b, #xbest .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #xbest .who span { font-size: calc(var(--u) * 1.4); opacity: 0.85; }
+
+/* Trò chơi "Hộp bí ẩn" */
+.game { position: fixed; left: 50%; transform: translateX(-50%); width: min(86vw, calc(var(--u) * 58)); pointer-events: none;
+  padding: calc(var(--u) * 1.2) calc(var(--u) * 1.4) calc(var(--u) * 1.1); background: rgba(20, 18, 26, 0.9); border-radius: calc(var(--u) * 2); text-align: center; }
+.game[data-pos="bottom"] { bottom: 26vh; }
+.game[data-pos="middle"] { top: 34vh; }
+.game[data-pos="top"] { top: 12vh; }
+.game .gt { font-size: calc(var(--u) * 2.2); font-weight: 800; margin-bottom: calc(var(--u) * 0.9); overflow-wrap: anywhere; }
+.game.over .gt { color: var(--accent); }
+.game .gh { margin-top: calc(var(--u) * 0.8); font-size: calc(var(--u) * 1.5); opacity: 0.85; }
+.game .boxes { display: grid; gap: calc(var(--u) * 0.7); }
+.game .box { position: relative; aspect-ratio: 1 / 0.82; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0;
+  border-radius: calc(var(--u) * 1.1); background: #3a3350; border-bottom: calc(var(--u) * 0.5) solid #2a2440; }
+.game .box b { font-size: calc(var(--u) * 2.6); font-weight: 800; line-height: 1; }
+.game .box span { max-width: 92%; font-size: calc(var(--u) * 1.05); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.9; }
+.game .box.open { background: #1f4a3c; border-bottom-color: #17382e; }
+.game .box.open b { color: #46d39a; font-size: calc(var(--u) * 1.7); }
+.game .box.trap { background: var(--accent); border-bottom-color: #b0303c; animation: trap-hit 520ms ease-out both; }
+.game .box.trap b { color: #1d0609; }
+.game .box.trap span { color: #1d0609; font-weight: 700; }
+@keyframes trap-hit { 0% { transform: scale(0.6); } 55% { transform: scale(1.22); } 100% { transform: scale(1); } }

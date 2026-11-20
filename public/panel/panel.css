@@ -213,6 +213,20 @@ details.adv[open] > summary { margin-bottom: 10px; }
 .layer { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; border-top: 1px solid var(--line); }
 .layer:first-child { border-top: 0; }
 
+/* --- Trò chơi -------------------------------------------------------------- */
+.board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 64px; min-width: 0; padding: 4px;
+  background: var(--surface-2); border: 0; border-radius: var(--r-s); cursor: pointer; }
+.cell:hover:not(:disabled) { background: var(--line); }
+.cell b { font-size: var(--fs-head); }
+.cell span { max-width: 100%; font-size: var(--fs-small); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell:disabled { cursor: default; }
+.cell.open { box-shadow: inset 0 0 0 2px var(--ok); }
+.cell.open b { color: var(--ok); }
+.cell.trap { background: var(--accent); }
+.cell.trap b, .cell.trap span { color: var(--accent-ink); }
+@media (max-width: 620px) { .board { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
 /* --- Chào khách ------------------------------------------------------------ */
 .checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; min-width: 0; }

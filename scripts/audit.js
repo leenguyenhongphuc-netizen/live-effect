@@ -47,7 +47,7 @@ async function checkLayout(page, name) {
   note(r.small.length === 0, `${name}: vùng bấm đủ lớn${r.small.length ? ` → ${r.small.join(' | ')}` : ''}`);
 }
 
-const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Chào khách', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
+const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Chào khách', 'Trò chơi', 'Nhạc và nhịp', 'Phụ đề', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
 
 try {
   // ----- Máy tính ---------------------------------------------------------
@@ -265,6 +265,34 @@ try {
   await checkLayout(desk, 'Hiển thị (đồng hồ, top tim, quà to)');
   await desk.click('text=Đặt lại');
   for (const name of ['Đồng hồ đếm giờ live', 'Top thả tim', 'Quà to nhất']) await desk.locator(`.card:has(h2:text-is("${name}")) .switch`).first().click();
+  await sleep(500);
+  await desk.click('#clear-all');
+
+  // Trò chơi: bật, khán giả gõ số để mở hộp, chủ phòng bấm mở cho tới khi trúng bẫy.
+  await desk.click('#nav >> text=Trò chơi');
+  await desk.click('.card-head .switch');
+  await desk.waitForSelector('.board');
+  await sleep(800); // chờ cài đặt được lưu xuống máy chủ
+  app.ingest({ type: 'chat', user: 'an', nickname: 'An', text: '3' });
+  await sleep(500);
+  const opened = await frame().evaluate(() => [...document.querySelectorAll('#game .box.open, #game .box.trap')].map((b) => b.textContent));
+  note(opened.length === 1 && opened[0].includes('An'), `Trò chơi: bình luận "3" mở hộp 3 và ghi tên người mở (${opened.join('|')})`);
+  await desk.screenshot({ path: path.join(shots, '24-tro-choi.png') });
+  await checkLayout(desk, 'Trò chơi');
+  for (let n = 1; n <= 12; n++) {
+    const cell = desk.locator('.board .cell').nth(n - 1);
+    if (await cell.isDisabled()) continue;
+    await cell.click();
+    await sleep(120);
+    if (await desk.locator('.board .cell.trap').count()) break;
+  }
+  await sleep(400);
+  note(await frame().locator('#game.over .box.trap').count() === 1, 'Trò chơi: mở trúng bẫy thì bàn chơi báo người thua');
+  note((await desk.locator('.card-head h2').last().textContent()).includes('đã mở trúng hộp'), 'Trò chơi: bảng điều khiển báo kết quả ván');
+  await desk.click('button:has-text("Ván mới")');
+  await sleep(400);
+  note(await frame().locator('#game .box.open, #game .box.trap').count() === 0, 'Trò chơi: ván mới thì mọi hộp đóng lại');
+  await desk.click('.card-head .switch');
   await sleep(500);
   await desk.click('#clear-all');
 

@@ -25,7 +25,7 @@ function h(spec, props, ...kids) {
 
 const S = {
   config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
-  fans: { size: 0, top: [] }, openTier: null, timer: { running: false, remaining: 0 },
+  fans: { size: 0, top: [] }, openTier: null, game: null, timer: { running: false, remaining: 0 },
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -342,6 +342,7 @@ function describe(rule) {
     button: t.hotkey ? `Nút bấm tay · phím ${t.hotkey}` : 'Nút bấm tay trên điện thoại',
     jar: 'Khi hũ quà đầy',
     timer: 'Khi đồng hồ đếm ngược về 0',
+    game: 'Khi có người mở trúng hộp bẫy',
   }[t.type];
   const a = rule.action;
   const then = [
@@ -538,6 +539,41 @@ function viewGreet() {
         ? `Sổ fan đang nhớ ${nf.format(S.fans.size)} khán giả.${S.fans.top.length ? ` Tặng nhiều nhất: ${S.fans.top.slice(0, 3).map((f) => `${f.name} (${nf.format(f.coins)} xu)`).join(', ')}.` : ''}`
         : 'Sổ fan còn trống. Nó tự ghi lại khán giả vào phòng và số xu họ tặng qua từng buổi live.')),
     h('div.rules', null, S.catalog.greetTiers.map(tierBlock)));
+}
+
+// --- Mục: Trò chơi ----------------------------------------------------------
+async function gameDo(body) {
+  try { S.game = (await api('POST', '/api/game', body)).game; render(); } catch (err) { toast(err.message); }
+}
+
+function viewGame() {
+  const g = S.config.game;
+  const s = S.game;
+  const opened = new Map((s?.opened || []).map((o) => [o.n, o.name]));
+  return h('div.view', null,
+    head('Trò chơi cho khán giả', 'Hộp bí ẩn: một dãy hộp đánh số, đúng một hộp có bẫy. Ai mở trúng thì thua.'),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Hộp bí ẩn'), toggle(g, 'enabled', g.enabled ? 'Đang bật' : 'Đang tắt', render)),
+      h('ol.steps-list', null,
+        h('li', null, 'Khán giả gõ ', h('b', null, 'một con số'), ' trong bình luận (ví dụ ', h('b', null, '7'), ') để mở hộp số đó.'),
+        h('li', null, 'Mở trúng hộp bẫy là thua: bàn chơi báo tên người đó, kèm tiếng nổ.'),
+        h('li', null, 'Sau vài giây, ván mới tự bắt đầu với hộp bẫy ở chỗ khác.')),
+      g.enabled ? [
+        h('div.grid2', null,
+          field('Dòng tiêu đề', textInput(g, 'title')),
+          field('Vị trí bàn chơi', select(g, 'position', [['bottom', 'Phía dưới'], ['middle', 'Giữa màn hình'], ['top', 'Phía trên']])),
+          field('Số hộp', numInput(g, 'boxes', { min: 4, max: 24 }), 'Đổi số hộp có hiệu lực từ ván sau.'),
+          field('Nghỉ giữa hai ván (giây)', numInput(g, 'restart', { min: 3, max: 120 }))),
+        h('p.small.muted', null, 'Muốn người thua bị “phạt” bằng video hay hiệu ứng: vào Kịch bản, tạo kịch bản với sự kiện “Trò chơi: có người mở trúng hộp bẫy”.'),
+      ] : null),
+    g.enabled && s ? h('section.card', null,
+      h('div.card-head', null, h('h2', null, s.loser ? `${s.loser.name} đã mở trúng hộp ${s.loser.n}` : `Ván ${s.round}: đã mở ${opened.size}/${s.size} hộp`),
+        h('button.btn', { type: 'button', onclick: () => gameDo({ action: 'reset' }) }, 'Ván mới')),
+      h('p.small.muted', null, 'Bạn cũng có thể tự bấm mở hộp để chơi thử hoặc chơi thay khán giả.'),
+      h('div.board', null, Array.from({ length: s.size }, (_, i) => i + 1).map((n) =>
+        h(`button.cell${opened.has(n) ? (s.trap === n ? '.trap' : '.open') : ''}`, { type: 'button', disabled: opened.has(n) || Boolean(s.loser),
+          'aria-label': opened.has(n) ? `Hộp ${n}, ${opened.get(n)} đã mở` : `Mở hộp ${n}`, onclick: () => gameDo({ action: 'pick', n }) },
+        h('b', null, String(n)), opened.has(n) ? h('span', null, opened.get(n)) : null)))) : null);
 }
 
 // --- Mục: Quà tặng ----------------------------------------------------------
@@ -966,14 +1002,14 @@ function viewDisplay() {
 }
 
 // --- Mục: Nhật ký -----------------------------------------------------------
-const KIND = { timer: 'Hết giờ', jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
+const KIND = { game: 'Trò chơi', timer: 'Hết giờ', jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
 function logRow(e) {
   const what = {
     donate: `ủng hộ ${fmtVnd(e.amount)}${e.text ? `: ${e.text}` : ''}`,
     gift: `tặng ${e.count || 1} ${e.giftName || 'quà'}${e.coins ? ` (${e.coins} xu)` : ''}`,
     like: `thả ${e.likeCount || 1} tim`,
     chat: e.text,
-    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy', timer: 'đã đếm về 0',
+    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy', timer: 'đã đếm về 0', game: `mở trúng hộp bẫy số ${e.text}`,
   }[e.type] || '';
   const ran = (e.fired || []).map((id) => S.config.rules.find((r) => r.id === id)?.name).filter(Boolean);
   return h('div.log-row', null,
@@ -997,6 +1033,7 @@ const VIEWS = [
   ['rules', 'Kịch bản', 'rules', viewRules],
   ['gifts', 'Quà tặng', 'giftrain', viewGifts],
   ['greet', 'Chào khách', 'greet', viewGreet],
+  ['game', 'Trò chơi', 'game', viewGame],
   ['music', 'Nhạc và nhịp', 'music', viewMusic],
   ['captions', 'Phụ đề', 'caption', viewCaptions],
   ['phone', 'Điện thoại', 'phone', viewPhone],
@@ -1078,6 +1115,7 @@ function connectWs() {
         if (list) list.prepend(logRow(msg.event)); else render();
       }
     } else if (msg.type === 'media') { S.media = msg.media; softRender(); }
+    else if (msg.type === 'game') { S.game = msg; if (S.view === 'game') softRender(); }
     else if (msg.type === 'timer') { S.timer = msg; if (S.view === 'display') softRender(); }
     else if (msg.type === 'queue') { S.queue = msg.queue; if (S.view === 'deck') softRender(); else renderStatus(); }
     else if (msg.type === 'gifts') { S.gifts = msg.gifts; if (S.view === 'gifts') softRender(); }

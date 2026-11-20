@@ -31,6 +31,7 @@ export const TRIGGERS = [
   { id: 'donate', name: 'Có người ủng hộ (chuyển khoản, nguồn khác)' },
   { id: 'jar', name: 'Hũ quà đầy' },
   { id: 'timer', name: 'Hết giờ đếm ngược' },
+  { id: 'game', name: 'Trò chơi: có người mở trúng hộp bẫy' },
   { id: 'button', name: 'Nút bấm tay (điện thoại, phím tắt)' },
 ];
 
@@ -106,6 +107,7 @@ export function defaultConfig() {
     captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
     jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
     greet: { enabled: false, once: true, tiers: defaultGreetTiers() },
+    game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
       topLikes: { enabled: false, title: 'Top thả tim', max: 3, position: 'bottom-left' },
@@ -340,6 +342,16 @@ export function sanitizeConfig(input) {
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
     greet: { enabled: bool(gr.enabled, false), once: bool(gr.once, true), tiers: greetTiers },
+    game: (() => {
+      const gm = c.game && typeof c.game === 'object' ? c.game : {};
+      return {
+        enabled: bool(gm.enabled, false),
+        title: str(gm.title, 40) || 'Hộp bí ẩn: ai mở trúng bẫy?',
+        boxes: Math.round(num(gm.boxes, 4, 24, 12)),
+        restart: Math.round(num(gm.restart, 3, 120, 8)),
+        position: oneOf(gm.position, ['top', 'middle', 'bottom'], 'bottom'),
+      };
+    })(),
     extras: (() => {
       const ex = c.extras && typeof c.extras === 'object' ? c.extras : {};
       const tm = ex.timer || {};

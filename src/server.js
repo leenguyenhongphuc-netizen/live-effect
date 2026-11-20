@@ -14,6 +14,7 @@ import { EffectQueue } from './queue.js';
 import { FanBook } from './fans.js';
 import { Greeter, TIERS } from './greet.js';
 import { LiveExtras } from './extras.js';
+import { BoxGame } from './game.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -102,6 +103,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       captions: store.config.captions,
       jar: store.config.jar,
       extras: store.config.extras,
+      game: store.config.game,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
   };
@@ -152,6 +154,12 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     // Hết giờ: chạy các kịch bản có sự kiện "Hết giờ đếm ngược".
     onTimeUp: () => { const ev = { type: 'timer', nickname: 'Đồng hồ' }; record(ev, engine.handle(ev)); },
   });
+  const game = new BoxGame({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); broadcast('panel', msg); },
+    // Có người mở trúng hộp bẫy: chạy các kịch bản có sự kiện của trò chơi.
+    onLose: (ev) => record(ev, engine.handle(ev)),
+  });
   // Mọi hiệu ứng đi qua hàng đợi: video toàn màn hình phát lần lượt theo ưu tiên, còn lại chạy ngay.
   const engine = new Engine(() => store.config, (msg) => {
     if (msg.type === 'fx') queue.push(msg); else broadcast('overlay', msg);
@@ -176,6 +184,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     // Sổ fan và chào khách: ghi nhận người vào phòng, chào theo bậc; cộng xu cho người tặng quà.
     if (ev.type === 'gift' && !ev.simulated) fans.addCoins(ev.user, ev.nickname, ev.coins);
     extras.onEvent(ev);
+    if (ev.type === 'chat') game.handleChat(ev);
     const greeted = ev.type === 'join' ? greeter.handleJoin(ev) : null;
     if (greeted) record({ ...ev, greeted }, []);
     const fired = engine.handle(ev);
@@ -222,6 +231,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     broadcast('overlay', engine.topState());
     broadcast('overlay', { ...jar.state(), drops: undefined });
     for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) broadcast('overlay', m);
+    broadcast('overlay', game.state());
     broadcast('panel', { type: 'config', config: store.config });
     onConfigChange?.(store.config);
   };
@@ -339,6 +349,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     gifts: catalog.list(),
     queue: queue.state(),
     timer: extras.timerState(),
+    game: game.state(),
     fans: { size: fans.size, top: fans.top(10) },
     catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS, greetTiers: TIERS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
@@ -482,6 +493,14 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
       greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
       return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/game') {
+      const body = await readJson(req);
+      if (body.action === 'reset') game.reset();
+      else if (body.action === 'pick') game.pick(body.n, { nickname: 'Chủ phòng', host: true });
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { game: game.state() });
     }
 
     if (route === 'POST /api/timer') {
@@ -645,6 +664,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
         ws.send(JSON.stringify(widgetsMsg()));
         ws.send(JSON.stringify(engine.goalState()));
         ws.send(JSON.stringify(jar.state()));
+        ws.send(JSON.stringify(game.state()));
         for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) ws.send(JSON.stringify(m));
         ws.send(JSON.stringify(engine.topState()));
       } else {
@@ -712,6 +732,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       await camera.close();
       fans.save();
       extras.close();
+      game.close();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();
       await new Promise((r) => server.close(r));

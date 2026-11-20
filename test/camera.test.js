@@ -409,3 +409,42 @@ test('OBS: đổi cảnh rồi tự quay về, hiện nguồn một lúc rồi �
   } finally { await cam.close(); await obs.close(); }
   assert.equal(await cam.scene('Game'), false); // đã ngắt thì không làm gì
 });
+
+test('trò chơi Hộp bí ẩn: gõ số để mở, trúng bẫy thì thua, không lộ bẫy khi đang chơi', async () => {
+  const { BoxGame } = await import('../src/game.js');
+  const cfg = { game: { enabled: true, title: 'Hộp bí ẩn', boxes: 6, restart: 60 } };
+  const out = [];
+  const lost = [];
+  let now = 10_000;
+  let trapAt = 3; // hộp bẫy là số 4
+  const g = new BoxGame({ getConfig: () => cfg, emit: (m) => out.push(m), onLose: (e) => lost.push(e), random: () => trapAt, now: () => now });
+  try {
+    assert.equal(g.state().trap, 0); // chưa ai thua thì không gửi vị trí bẫy ra ngoài
+    assert.equal(g.handleChat({ user: 'a', nickname: 'An', text: 'chào cả nhà' }), null);
+    assert.equal(g.handleChat({ user: 'a', nickname: 'An', text: ' 2 ' }), 'safe');
+    assert.equal(g.handleChat({ user: 'a', nickname: 'An', text: '5' }), null); // cùng người, mở quá nhanh
+    now += 3000;
+    assert.equal(g.handleChat({ user: 'a', nickname: 'An', text: 'mở 5' }), 'safe');
+    assert.equal(g.handleChat({ user: 'b', nickname: 'Bình', text: '2' }), null); // hộp đã mở
+    assert.equal(g.handleChat({ user: 'b', nickname: 'Bình', text: '9' }), null); // ngoài phạm vi
+    assert.equal(g.handleChat({ user: 'b', nickname: 'Bình', text: 'tôi chọn 4 nhé' }), null); // phải là một con số đứng riêng
+    assert.equal(g.handleChat({ user: 'b', nickname: 'Bình', text: '#4' }), 'trap');
+    assert.deepEqual(lost, [{ type: 'game', user: 'b', nickname: 'Bình', avatar: '', text: '4' }]);
+    assert.deepEqual([g.state().trap, g.state().loser.name, g.state().opened.length], [4, 'Bình', 3]);
+    assert.equal(g.pick(1, { user: 'c' }), null); // ván đã kết thúc
+    // Ván mới: bẫy đổi chỗ, hộp đóng lại. Chủ phòng bấm thì không bị chặn nhịp.
+    trapAt = 0;
+    g.reset();
+    assert.deepEqual([g.state().round, g.state().opened.length, g.state().loser], [2, 0, null]);
+    assert.equal(g.pick(2, { nickname: 'Chủ phòng', host: true }), 'safe');
+    assert.equal(g.pick(3, { nickname: 'Chủ phòng', host: true }), 'safe');
+    cfg.game.enabled = false;
+    assert.equal(g.handleChat({ user: 'd', text: '1' }), null);
+    // Thống kê nhanh: bẫy rải đều, không dồn vào một hộp.
+    const real = new BoxGame({ getConfig: () => ({ game: { enabled: true, boxes: 6, restart: 60 } }), emit: () => {}, onLose: () => {} });
+    const seen = new Set();
+    for (let i = 0; i < 200; i++) { seen.add(real.trap); real.reset(); }
+    assert.equal(seen.size, 6);
+    real.close();
+  } finally { g.close(); }
+});
