@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Effect</title>
+<link rel="stylesheet" href="/panel/panel.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)"/><path d="M16 6.5l2.6 6.9 6.9 2.6-6.9 2.6L16 25.5l-2.6-6.9-6.9-2.6 6.9-2.6z" fill="var(--accent-ink)"/></svg>
+      <span>Live Effect</span>
+    </div>
+    <nav id="nav" aria-label="Mục chính"></nav>
+    <div class="side-status" id="side-status" aria-live="polite"></div>
+  </aside>
+
+  <main class="main" id="main" tabindex="-1"></main>
+
+  <aside class="preview" aria-label="Xem thử overlay">
+    <div class="preview-head">
+      <h2>Xem thử</h2>
+      <div class="seg" role="group" aria-label="Hướng khung hình">
+        <button type="button" data-orient="portrait" aria-pressed="true">Dọc</button>
+        <button type="button" data-orient="landscape" aria-pressed="false">Ngang</button>
+      </div>
+    </div>
+    <div class="stage" id="stage" data-orient="portrait">
+      <div class="stage-bg"><span>Video của bạn</span></div>
+      <iframe id="preview-frame" title="Xem thử overlay" src="/overlay?preview=1" tabindex="-1"></iframe>
+    </div>
+    <p class="preview-note">Khán giả sẽ thấy hiệu ứng đè lên video của bạn như thế này. Khung xem thử không phát tiếng.</p>
+    <button type="button" class="btn ghost" id="clear-all">Dừng mọi hiệu ứng đang chạy</button>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/panel/panel.js"></script>
+</body>
+</html>
