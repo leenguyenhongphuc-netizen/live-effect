@@ -30,6 +30,7 @@ export const TRIGGERS = [
   { id: 'join', name: 'Có người vào xem' },
   { id: 'donate', name: 'Có người ủng hộ (chuyển khoản, nguồn khác)' },
   { id: 'jar', name: 'Hũ quà đầy' },
+  { id: 'timer', name: 'Hết giờ đếm ngược' },
   { id: 'button', name: 'Nút bấm tay (điện thoại, phím tắt)' },
 ];
 
@@ -101,6 +102,11 @@ export function defaultConfig() {
     captions: { enabled: false, showOriginal: true, position: 'bottom', size: 2 },
     jar: { enabled: false, title: 'Hũ quà', target: 500, position: 'right', size: 2 },
     greet: { enabled: false, once: true, tiers: defaultGreetTiers() },
+    extras: {
+      timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
+      topLikes: { enabled: false, title: 'Top thả tim', max: 3, position: 'bottom-left' },
+      bestGift: { enabled: false, title: 'Quà to nhất', position: 'bottom-right' },
+    },
     camera: { enabled: false, source: '', beat: 'off', amount: 2 },
     music: {
       enabled: false, source: 'system', deviceId: '', sensitivity: 1, palette: 'storm',
@@ -326,6 +332,21 @@ export function sanitizeConfig(input) {
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
     greet: { enabled: bool(gr.enabled, false), once: bool(gr.once, true), tiers: greetTiers },
+    extras: (() => {
+      const ex = c.extras && typeof c.extras === 'object' ? c.extras : {};
+      const tm = ex.timer || {};
+      const tl = ex.topLikes || {};
+      const bg = ex.bestGift || {};
+      const corner = (v, dflt) => oneOf(v, ['top-left', 'top-right', 'bottom-left', 'bottom-right'], dflt);
+      return {
+        timer: {
+          enabled: bool(tm.enabled, false), title: str(tm.title, 30) || 'Thời gian live',
+          minutes: num(tm.minutes, 1, 1440, 30), perCoin: num(tm.perCoin, 0, 600, 1), position: corner(tm.position, 'top-right'),
+        },
+        topLikes: { enabled: bool(tl.enabled, false), title: str(tl.title, 30) || 'Top thả tim', max: Math.round(num(tl.max, 1, 10, 3)), position: corner(tl.position, 'bottom-left') },
+        bestGift: { enabled: bool(bg.enabled, false), title: str(bg.title, 30) || 'Quà to nhất', position: corner(bg.position, 'bottom-right') },
+      };
+    })(),
     jar: {
       enabled: bool(jr.enabled, false),
       title: str(jr.title, 30) || 'Hũ quà',

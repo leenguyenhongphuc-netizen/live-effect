@@ -243,6 +243,31 @@ try {
   await desk.click('.card-head .switch');
   await sleep(500);
 
+  // Đồng hồ đếm giờ, top thả tim, quà to nhất.
+  await desk.click('#nav >> text=Hiển thị');
+  for (const name of ['Đồng hồ đếm giờ live', 'Top thả tim', 'Quà to nhất']) await desk.locator(`.card:has(h2:text-is("${name}")) .switch`).first().click();
+  await sleep(700);
+  await desk.click('text=Bắt đầu đếm');
+  await desk.waitForSelector('text=Tạm dừng');
+  app.ingest({ type: 'like', user: 'a', nickname: 'An', likeCount: 120 });
+  app.ingest({ type: 'like', user: 'b', nickname: 'Bình', likeCount: 300 });
+  app.ingest({ type: 'gift', user: 'b', nickname: 'Bình', giftId: '9999', giftName: 'Universe', count: 1, coins: 44999 });
+  await sleep(1600);
+  const xs = await frame().evaluate(() => ({
+    time: document.querySelector('#xtimer .time')?.textContent, likes: [...document.querySelectorAll('#xlikes .who')].map((n) => n.textContent),
+    best: document.querySelector('#xbest .who b')?.textContent, shown: ['xtimer', 'xlikes', 'xbest'].every((id) => !document.getElementById(id).hidden),
+  }));
+  note(xs.shown && /^1:\d\d:\d\d$/.test(xs.time), `Đồng hồ: đang đếm, quà lớn đã cộng thêm giờ (hiện ${xs.time})`);
+  note(xs.likes.join(',') === 'Bình,An', `Top thả tim: xếp đúng thứ tự (${xs.likes.join(', ')})`);
+  note(xs.best === 'Bình', 'Quà to nhất: hiện đúng người tặng');
+  await desk.locator('.card:has(h2:text-is("Đồng hồ đếm giờ live"))').scrollIntoViewIfNeeded();
+  await desk.screenshot({ path: path.join(shots, '23-dong-ho.png') });
+  await checkLayout(desk, 'Hiển thị (đồng hồ, top tim, quà to)');
+  await desk.click('text=Đặt lại');
+  for (const name of ['Đồng hồ đếm giờ live', 'Top thả tim', 'Quà to nhất']) await desk.locator(`.card:has(h2:text-is("${name}")) .switch`).first().click();
+  await sleep(500);
+  await desk.click('#clear-all');
+
   // Phụ đề: bật, gửi câu mẫu, rồi đi qua trang phụ đề bằng ô "Gõ thử".
   await desk.click('#nav >> text=Phụ đề');
   await desk.click('.card-head .switch');

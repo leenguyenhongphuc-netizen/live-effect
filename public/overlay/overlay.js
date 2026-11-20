@@ -3,19 +3,21 @@ import { playSound, stopSounds } from '/overlay/sound.js';
 import { keyedCanvas } from '/overlay/key.js';
 import { Reactive } from '/overlay/react.js';
 import { JarView } from '/overlay/jar.js';
+import { Extras } from '/overlay/extras.js';
 
 // Tham số trên link:
 //   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
 //   ?layers=fx,alerts...  chỉ hiện một số lớp, dùng khi muốn tách thành nhiều nguồn trong OBS
 const params = new URLSearchParams(location.search);
 const preview = params.get('preview') === '1';
-const layers = new Set((params.get('layers') || 'jar,caption,fx,alerts,media,chat,goal,top,qr').split(','));
+const layers = new Set((params.get('layers') || 'extras,jar,caption,fx,alerts,media,chat,goal,top,qr').split(','));
 const has = (name) => layers.has(name);
 
 const $ = (id) => document.getElementById(id);
 const fx = new Fx($('fx'));
 const react = new Reactive($('react'));
 const jar = new JarView($('jar'));
+const extras = new Extras(document.body);
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
 const nf = new Intl.NumberFormat('vi-VN');
 const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
@@ -279,9 +281,13 @@ function onMessage(msg) {
       if (has('fx')) react.setConfig(msg.music);
       applyCaptions(msg.captions);
       if (has('jar')) jar.setConfig(msg.jar);
+      if (has('extras')) extras.setConfig(msg.extras);
       break;
     case 'audio': if (has('fx')) react.onAudio(msg); break;
     case 'caption': showCaption(msg); break;
+    case 'timer': extras.onTimer(msg); break;
+    case 'toplikes': extras.onLikes(msg); break;
+    case 'bestgift': extras.onBest(msg); break;
     case 'jar': if (has('jar')) jar.setState(msg); break;
     case 'jardrop': if (has('jar')) jar.drop(msg); break;
     case 'jarburst':
@@ -316,4 +322,4 @@ applyWidgets(widgets);
 connect();
 
 // Cho phép kiểm thử tự động đọc trạng thái.
-window.__overlay = { fx, react, jar, onMessage };
+window.__overlay = { fx, react, jar, extras, onMessage };

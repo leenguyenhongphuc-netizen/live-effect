@@ -322,3 +322,54 @@ test('sổ fan và chào khách theo bậc', async () => {
   // Cấp người xem và cấp đội fan được đọc từ dữ liệu TikTok.
   assert.deepEqual([normalizeUser({ uniqueId: 'a', payGrade: { level: 42 }, fansClub: { data: { level: 17 } } })].map((u) => [u.level, u.fanLevel]), [[42, 17]]);
 });
+
+test('đồng hồ đếm giờ: quà cộng giờ, tạm dừng, hết giờ thì báo; top thả tim và quà to nhất', async () => {
+  const { LiveExtras } = await import('../src/extras.js');
+  let now = 1_000_000;
+  const cfg = { extras: { timer: { enabled: true, title: 'Giờ live', minutes: 2, perCoin: 2 }, topLikes: { title: 'Top tim', max: 2 }, bestGift: { title: 'Quà to' } } };
+  const out = [];
+  let up = 0;
+  const x = new LiveExtras({ getConfig: () => cfg, emit: (m) => out.push(m), onTimeUp: () => { up += 1; }, now: () => now });
+  try {
+    assert.equal(x.remaining(), 120);
+    x.onEvent({ type: 'gift', coins: 10 }); // chưa chạy thì quà không cộng giờ
+    assert.equal(x.remaining(), 120);
+    x.start();
+    now += 20_000;
+    assert.equal(x.remaining(), 100);
+    x.onEvent({ type: 'gift', nickname: 'An', giftName: 'Rose', coins: 10, count: 10 });
+    assert.equal(x.remaining(), 120); // 10 xu × 2 giây
+    assert.equal(out.at(-1).added, 20);
+    x.onEvent({ type: 'gift', coins: 1e6 }); // một lượt quà cộng tối đa 1 giờ
+    assert.equal(x.remaining(), 3720);
+    x.pause();
+    now += 500_000;
+    assert.equal(x.remaining(), 3720); // dừng thì không trôi
+    x.add(-3700);
+    assert.equal(x.remaining(), 20);
+    x.reset();
+    assert.deepEqual([x.remaining(), x.timerState().running], [120, false]);
+
+    // Quà to nhất: chỉ thay khi có quà giá trị hơn.
+    assert.equal(x.bestState().best.coins, 1e6);
+    x.resetSession();
+    x.onEvent({ type: 'gift', nickname: 'An', giftName: 'Rose', coins: 5, count: 5 });
+    x.onEvent({ type: 'gift', nickname: 'Bình', giftName: 'Lion', coins: 29999, giftImage: 'https://cdn/l.png' });
+    x.onEvent({ type: 'gift', nickname: 'Cường', giftName: 'Hat', coins: 99 });
+    assert.deepEqual(x.bestState().best, { name: 'Bình', gift: 'Lion', count: 1, coins: 29999, image: 'https://cdn/l.png' });
+    // Top thả tim: cộng dồn theo người, cắt theo số dòng đã đặt.
+    x.onEvent({ type: 'like', user: 'a', nickname: 'A', likeCount: 30 });
+    x.onEvent({ type: 'like', user: 'b', nickname: 'B', likeCount: 50 });
+    x.onEvent({ type: 'like', user: 'a', nickname: 'A', likeCount: 40 });
+    x.onEvent({ type: 'like', user: 'c', nickname: 'C', likeCount: 5 });
+    assert.deepEqual(x.likesState().rows.map((r) => [r.name, r.coins]), [['A', 70], ['B', 50]]);
+  } finally { x.close(); }
+
+  // Hết giờ thật (đồng hồ thật, 1 giây): báo đúng một lần và dừng ở 0.
+  const cfg2 = { extras: { timer: { enabled: true, title: '', minutes: 1 / 60, perCoin: 0 }, topLikes: { max: 3 }, bestGift: {} } };
+  const y = new LiveExtras({ getConfig: () => cfg2, emit: () => {}, onTimeUp: () => { up += 1; } });
+  y.start();
+  await wait(1250);
+  assert.deepEqual([up, y.remaining(), y.timerState().running], [1, 0, false]);
+  y.close();
+});

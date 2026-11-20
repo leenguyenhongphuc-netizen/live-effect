@@ -155,3 +155,28 @@ html, body {
 #caption .tr { font-size: var(--cap); font-weight: 700; line-height: 1.25; }
 #caption .tr + .tr { margin-top: calc(var(--u) * 0.3); color: var(--gold); }
 #caption .src { margin-top: calc(var(--u) * 0.4); font-size: calc(var(--cap) * 0.62); line-height: 1.3; opacity: 0.82; }
+
+/* Đồng hồ đếm ngược, top thả tim, quà to nhất */
+.xw { position: fixed; pointer-events: none; background: rgba(20, 18, 26, 0.86); border-radius: calc(var(--u) * 1.8);
+  padding: calc(var(--u) * 1) calc(var(--u) * 1.4); font-size: calc(var(--u) * 1.7); max-width: calc(var(--u) * 30); }
+.xw[data-pos^="top"] { top: 9vh; }
+.xw[data-pos^="bottom"] { bottom: 16vh; }
+.xw[data-pos$="left"] { left: calc(var(--u) * 2.4); }
+.xw[data-pos$="right"] { right: calc(var(--u) * 2.4); }
+.xw .xt { font-weight: 700; color: var(--gold); margin-bottom: calc(var(--u) * 0.4); }
+#xtimer { text-align: center; min-width: calc(var(--u) * 17); }
+#xtimer .time { font-size: calc(var(--u) * 4.4); font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+#xtimer .time.zero { color: var(--accent); }
+#xtimer .add { margin-top: calc(var(--u) * 0.2); font-weight: 700; color: #46d39a; animation: msg-in 220ms ease-out both; }
+#xlikes { width: calc(var(--u) * 27); }
+.xrows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(var(--u) * 0.5); }
+.xrows li { display: flex; align-items: center; gap: calc(var(--u) * 0.7); font-weight: 600; }
+.xrows .rank { flex: none; width: 1.2em; color: var(--gold); font-variant-numeric: tabular-nums; }
+.xrows img { flex: none; width: calc(var(--u) * 2.6); height: calc(var(--u) * 2.6); border-radius: 50%; object-fit: cover; background: #2a2732; }
+.xrows .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xrows .num { font-variant-numeric: tabular-nums; }
+#xbest .best { display: flex; align-items: center; gap: calc(var(--u) * 1); }
+#xbest img { flex: none; width: calc(var(--u) * 6); height: calc(var(--u) * 6); object-fit: contain; }
+#xbest .who { display: flex; flex-direction: column; min-width: 0; }
+#xbest .who b, #xbest .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#xbest .who span { font-size: calc(var(--u) * 1.4); opacity: 0.85; }

@@ -25,7 +25,7 @@ function h(spec, props, ...kids) {
 
 const S = {
   config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
-  fans: { size: 0, top: [] }, openTier: null,
+  fans: { size: 0, top: [] }, openTier: null, timer: { running: false, remaining: 0 },
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -341,6 +341,7 @@ function describe(rule) {
     donate: `Khi có người ủng hộ${t.minAmount ? ` từ ${fmtVnd(t.minAmount)}` : ''}`,
     button: t.hotkey ? `Nút bấm tay · phím ${t.hotkey}` : 'Nút bấm tay trên điện thoại',
     jar: 'Khi hũ quà đầy',
+    timer: 'Khi đồng hồ đếm ngược về 0',
   }[t.type];
   const a = rule.action;
   const then = [
@@ -840,6 +841,47 @@ async function makeButton(file) {
   } catch (err) { toast(err.message); }
 }
 
+const CORNERS = [['top-left', 'Trên, bên trái'], ['top-right', 'Trên, bên phải'], ['bottom-left', 'Dưới, bên trái'], ['bottom-right', 'Dưới, bên phải']];
+const clockText = (s) => `${Math.floor(s / 3600) ? `${Math.floor(s / 3600)} giờ ` : ''}${Math.floor((s % 3600) / 60)} phút ${s % 60} giây`;
+
+async function timerDo(action, seconds) {
+  try { S.timer = (await api('POST', '/api/timer', { action, seconds })).timer; render(); } catch (err) { toast(err.message); }
+}
+
+function extrasCards() {
+  const x = S.config.extras;
+  const t = S.timer;
+  return [
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Đồng hồ đếm giờ live'), toggle(x.timer, 'enabled', null, render)),
+      h('p.small.muted', null, 'Đồng hồ đếm ngược trên màn hình; khán giả tặng quà thì cộng thêm giờ. Hết giờ sẽ chạy các kịch bản có sự kiện “Hết giờ đếm ngược”.'),
+      x.timer.enabled ? [
+        h('div.grid2', null,
+          field('Tiêu đề', textInput(x.timer, 'title')),
+          field('Vị trí', select(x.timer, 'position', CORNERS)),
+          field('Bắt đầu từ (phút)', numInput(x.timer, 'minutes', { min: 1, max: 1440 })),
+          field('Mỗi xu cộng thêm (giây)', numInput(x.timer, 'perCoin', { min: 0, max: 600, step: 0.5 }), 'Đặt 0 nếu không muốn quà cộng giờ.')),
+        h('p.note', { role: 'status' }, `${t.running ? 'Đang chạy' : 'Đang dừng'} · còn ${clockText(t.remaining)}`),
+        h('div.btn-row', null,
+          t.running ? h('button.btn', { type: 'button', onclick: () => timerDo('pause') }, 'Tạm dừng')
+            : h('button.btn.primary', { type: 'button', onclick: () => timerDo('start') }, 'Bắt đầu đếm'),
+          h('button.btn', { type: 'button', onclick: () => timerDo('add', 60) }, 'Cộng 1 phút'),
+          h('button.btn.ghost', { type: 'button', onclick: () => timerDo('reset') }, 'Đặt lại')),
+      ] : null),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Top thả tim'), toggle(x.topLikes, 'enabled', null, render)),
+      x.topLikes.enabled ? h('div.grid3', null,
+        field('Tiêu đề', textInput(x.topLikes, 'title')),
+        field('Số người', numInput(x.topLikes, 'max', { min: 1, max: 10 })),
+        field('Vị trí', select(x.topLikes, 'position', CORNERS))) : h('p.small.muted', null, 'Bảng xếp hạng những người thả tim nhiều nhất trong buổi live.')),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Quà to nhất'), toggle(x.bestGift, 'enabled', null, render)),
+      x.bestGift.enabled ? h('div.grid2', null,
+        field('Tiêu đề', textInput(x.bestGift, 'title')),
+        field('Vị trí', select(x.bestGift, 'position', CORNERS))) : h('p.small.muted', null, 'Luôn hiện món quà giá trị nhất của buổi live và tên người tặng.')),
+  ];
+}
+
 // --- Mục: Hiển thị ----------------------------------------------------------
 let voices = [];
 function viewDisplay() {
@@ -904,6 +946,7 @@ function viewDisplay() {
         field('Tiêu đề', textInput(w.top, 'title')),
         field('Số người hiện', numInput(w.top, 'max', { min: 1, max: 10 })),
         field('Vị trí', select(w.top, 'position', [['top-left', 'Trên, bên trái'], ['top-right', 'Trên, bên phải'], ['bottom-left', 'Dưới, bên trái'], ['bottom-right', 'Dưới, bên phải']])))),
+    extrasCards(),
     h('section.card', null,
       h('div.card-head', null, h('h2', null, 'Giọng đọc tự động'), toggle(tts, 'enabled')),
       h('p.small.muted', null, 'Giọng đọc phát qua loa máy tính, OBS thu lại bằng nguồn âm thanh màn hình. Giọng tiếng Việt cần cài trong Windows: Cài đặt → Thời gian & ngôn ngữ → Giọng nói.'),
@@ -914,14 +957,14 @@ function viewDisplay() {
 }
 
 // --- Mục: Nhật ký -----------------------------------------------------------
-const KIND = { jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
+const KIND = { timer: 'Hết giờ', jar: 'Hũ quà', follow: 'Follow', gift: 'Quà', like: 'Tim', share: 'Chia sẻ', chat: 'Bình luận', join: 'Vào xem', donate: 'Ủng hộ' };
 function logRow(e) {
   const what = {
     donate: `ủng hộ ${fmtVnd(e.amount)}${e.text ? `: ${e.text}` : ''}`,
     gift: `tặng ${e.count || 1} ${e.giftName || 'quà'}${e.coins ? ` (${e.coins} xu)` : ''}`,
     like: `thả ${e.likeCount || 1} tim`,
     chat: e.text,
-    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy',
+    follow: 'đã follow', share: 'đã chia sẻ', join: e.greeted ? `vào phòng, được chào theo bậc ${e.greeted}` : 'vào phòng', jar: 'góp món cuối, hũ đã đầy', timer: 'đã đếm về 0',
   }[e.type] || '';
   const ran = (e.fired || []).map((id) => S.config.rules.find((r) => r.id === id)?.name).filter(Boolean);
   return h('div.log-row', null,
@@ -1026,6 +1069,7 @@ function connectWs() {
         if (list) list.prepend(logRow(msg.event)); else render();
       }
     } else if (msg.type === 'media') { S.media = msg.media; softRender(); }
+    else if (msg.type === 'timer') { S.timer = msg; if (S.view === 'display') softRender(); }
     else if (msg.type === 'queue') { S.queue = msg.queue; if (S.view === 'deck') softRender(); else renderStatus(); }
     else if (msg.type === 'gifts') { S.gifts = msg.gifts; if (S.view === 'gifts') softRender(); }
     else if (msg.type === 'remote') { S.remote = msg.remote; if (S.view === 'phone') softRender(); }

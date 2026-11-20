@@ -13,6 +13,7 @@ import { Jar } from './jar.js';
 import { EffectQueue } from './queue.js';
 import { FanBook } from './fans.js';
 import { Greeter, TIERS } from './greet.js';
+import { LiveExtras } from './extras.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -100,6 +101,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       music: store.config.music,
       captions: store.config.captions,
       jar: store.config.jar,
+      extras: store.config.extras,
       widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
     };
   };
@@ -142,6 +144,12 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   });
   const fans = new FanBook(path.join(dataDir, 'fans.json'));
   const greeter = new Greeter({ getConfig: () => store.config, fans, fire: (msg) => queue.push(msg) });
+  const extras = new LiveExtras({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); if (msg.type === 'timer') broadcast('panel', msg); },
+    // Hết giờ: chạy các kịch bản có sự kiện "Hết giờ đếm ngược".
+    onTimeUp: () => { const ev = { type: 'timer', nickname: 'Đồng hồ' }; record(ev, engine.handle(ev)); },
+  });
   // Mọi hiệu ứng đi qua hàng đợi: video toàn màn hình phát lần lượt theo ưu tiên, còn lại chạy ngay.
   const engine = new Engine(() => store.config, (msg) => {
     if (msg.type === 'fx') queue.push(msg); else broadcast('overlay', msg);
@@ -165,6 +173,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     }
     // Sổ fan và chào khách: ghi nhận người vào phòng, chào theo bậc; cộng xu cho người tặng quà.
     if (ev.type === 'gift' && !ev.simulated) fans.addCoins(ev.user, ev.nickname, ev.coins);
+    extras.onEvent(ev);
     const greeted = ev.type === 'join' ? greeter.handleJoin(ev) : null;
     if (greeted) record({ ...ev, greeted }, []);
     const fired = engine.handle(ev);
@@ -196,7 +205,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
 
   tiktok.on('event', ingest);
   tiktok.on('status', (s) => {
-    if (s.state === 'connected' && tiktok.lastState !== 'connected') { engine.resetSession(); greeter.resetSession(); jar.reset(); broadcast('overlay', jar.state()); }
+    if (s.state === 'connected' && tiktok.lastState !== 'connected') { engine.resetSession(); greeter.resetSession(); extras.resetSession(); jar.reset(); broadcast('overlay', jar.state()); }
     tiktok.lastState = s.state;
     broadcast('panel', statusMsg());
   });
@@ -210,6 +219,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     broadcast('overlay', engine.goalState());
     broadcast('overlay', engine.topState());
     broadcast('overlay', { ...jar.state(), drops: undefined });
+    for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) broadcast('overlay', m);
     broadcast('panel', { type: 'config', config: store.config });
     onConfigChange?.(store.config);
   };
@@ -326,6 +336,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     media: store.listMedia(),
     gifts: catalog.list(),
     queue: queue.state(),
+    timer: extras.timerState(),
     fans: { size: fans.size, top: fans.top(10) },
     catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS, greetTiers: TIERS },
     overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
@@ -469,6 +480,16 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
       greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
       return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/timer') {
+      const body = await readJson(req);
+      if (body.action === 'start') extras.start();
+      else if (body.action === 'pause') extras.pause();
+      else if (body.action === 'reset') extras.reset();
+      else if (body.action === 'add') extras.add(Math.min(36000, Math.max(-36000, Number(body.seconds) || 0)));
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { timer: extras.timerState() });
     }
 
     if (route === 'POST /api/queue') {
@@ -622,6 +643,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
         ws.send(JSON.stringify(widgetsMsg()));
         ws.send(JSON.stringify(engine.goalState()));
         ws.send(JSON.stringify(jar.state()));
+        for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) ws.send(JSON.stringify(m));
         ws.send(JSON.stringify(engine.topState()));
       } else {
         ws.send(JSON.stringify(statusMsg()));
@@ -687,6 +709,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       await remote.close();
       await camera.close();
       fans.save();
+      extras.close();
       await tiktok.disconnect().catch(() => {});
       for (const c of clients) c.ws.terminate();
       await new Promise((r) => server.close(r));
