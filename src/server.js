@@ -138,6 +138,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const queue = new EffectQueue({
     dispatch: (msg) => {
       if (msg.camera && msg.camera !== 'none') camera.move(msg.camera, { duration: msg.duration });
+      if (msg.scene) camera.scene(msg.scene, msg.sceneReturn ? msg.duration : 0);
+      if (msg.source) camera.source(msg.source, msg.sourceMode, msg.duration);
       broadcast('overlay', msg);
     },
     onChange: () => { broadcast('panel', { type: 'queue', queue: queue.state() }); },

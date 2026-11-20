@@ -292,13 +292,13 @@ try {
 
   // Camera OBS: không có OBS thì phải báo rõ, không treo.
   await desk.click('#nav >> text=Nhạc và nhịp');
-  await desk.locator('.card:has-text("Camera chuyển động") .switch').click();
-  await desk.waitForSelector('.card:has-text("Camera chuyển động") .note.err', { timeout: 8000 }).catch(() => {});
-  note((await desk.locator('.card:has-text("Camera chuyển động") .note').textContent()).includes('Chưa nối được OBS'), 'Camera: không có OBS thì báo rõ cách bật');
-  await desk.locator('.card:has-text("Camera chuyển động")').scrollIntoViewIfNeeded();
+  await desk.locator('.card:has-text("Nối OBS") .switch').click();
+  await desk.waitForSelector('.card:has-text("Nối OBS") .note.err', { timeout: 8000 }).catch(() => {});
+  note((await desk.locator('.card:has-text("Nối OBS") .note').textContent()).includes('Chưa nối được OBS'), 'Camera: không có OBS thì báo rõ cách bật');
+  await desk.locator('.card:has-text("Nối OBS")').scrollIntoViewIfNeeded();
   await desk.screenshot({ path: path.join(shots, '20-camera.png') });
   await checkLayout(desk, 'Camera chuyển động');
-  await desk.locator('.card:has-text("Camera chuyển động") .switch').click();
+  await desk.locator('.card:has-text("Nối OBS") .switch').click();
   await sleep(400);
 
   // Điện thoại: bật, lấy địa chỉ từ mã QR.

@@ -437,7 +437,15 @@ function ruleEditor(rule) {
       field('Cách hiện', select(a, 'mediaFit', [['cover', 'Phủ kín màn hình'], ['center', 'Nhỏ ở giữa']])),
       isVideo && field('Xoá nền video', select(a, 'mediaKey', [['none', 'Không (video WebM trong suốt hoặc phủ kín)'], ['black', 'Xoá nền đen'], ['green', 'Xoá nền xanh lá']]),
         'Dùng khi video hiệu ứng có nền đen hoặc nền xanh, để vẫn thấy hình live phía sau.')) : null,
-    field('Chuyển động camera (cần bật ở mục Nhạc và nhịp, chỉ với OBS)', select(a, 'camera', [['none', 'Không'], ...CAM_MOVES])),
+    h('h3', null, 'Điều khiển OBS (cần bật “Nối OBS” ở mục Nhạc và nhịp)'),
+    h('div.grid2', null,
+      field('Chuyển động camera', select(a, 'camera', [['none', 'Không'], ...CAM_MOVES])),
+      field('Đổi sang cảnh', obsScenes().length
+        ? select(a, 'scene', [['', 'Không đổi cảnh'], ...obsScenes().map((x) => [x, x]), ...(a.scene && !obsScenes().includes(a.scene) ? [[a.scene, a.scene]] : [])], render)
+        : textInput(a, 'scene', { placeholder: 'Tên cảnh trong OBS' }), a.scene ? null : 'Bỏ trống nếu không đổi cảnh.'),
+      field('Hiện / ẩn nguồn', textInput(a, 'source', { placeholder: 'Tên nguồn trong cảnh đang phát' }, render)),
+      a.source ? field('Cách làm', select(a, 'sourceMode', [['flash', 'Hiện trong thời lượng rồi ẩn'], ['show', 'Hiện và giữ'], ['hide', 'Ẩn đi']])) : null),
+    a.scene ? toggle(a, 'sceneReturn', 'Hết thời lượng thì tự quay về cảnh cũ') : null,
     toggle(a, 'alert', 'Hiện dòng thông báo', render),
     a.alert ? field('Nội dung thông báo', textInput(a, 'text', { placeholder: 'Cảm ơn {user}!' }),
       t.type === 'donate'
@@ -609,6 +617,7 @@ function viewGifts() {
         : h('p.muted', null, 'Danh sách quà được tải từ TikTok ở lần kết nối với phiên live đầu tiên, rồi lưu lại trong máy. Trong lúc chờ, bạn vẫn tạo được kịch bản quà theo tên ở mục Kịch bản.')));
 }
 
+const obsScenes = () => S.status.camera?.scenes || [];
 const CAM_MOVES = [['zoomin', 'Zoom vào rồi trả về'], ['zoomout', 'Vào cận rồi kéo ra'], ['shake', 'Rung'], ['tilt', 'Nghiêng lắc'], ['spin', 'Xoay một vòng']];
 
 // --- Mục: Phụ đề ------------------------------------------------------------
@@ -670,13 +679,13 @@ async function startListening() {
 function cameraCard() {
   const cam = S.config.camera;
   const st = S.status.camera || { state: 'off', sources: [] };
-  const note = !cam.enabled ? ['', 'Khi bật, Live Effect nối vào OBS và di chuyển nguồn camera: zoom, rung, nghiêng, xoay. Xong mỗi lần, camera trở về đúng chỗ cũ.']
+  const note = !cam.enabled ? ['', 'Khi bật, Live Effect nối vào OBS để di chuyển camera (zoom, rung, nghiêng, xoay), đổi cảnh và ẩn hiện nguồn theo kịch bản. Xong mỗi lần, camera trở về đúng chỗ cũ.']
     : st.state === 'ready' ? ['ok', `Đã nối OBS, đang điều khiển nguồn “${st.source}”.`]
-      : st.state === 'error' ? ['err', st.error] : ['', 'Đang nối OBS…'];
+      : st.state === 'error' ? [st.linked ? 'wait' : 'err', st.linked ? `Đã nối OBS (${st.scenes.length} cảnh). ${st.error}` : st.error] : ['', 'Đang nối OBS…'];
   const sources = [['', 'Tự tìm webcam trong cảnh'], ...(st.sources || []).map((x) => [x, x])];
   if (cam.source && !sources.some(([v]) => v === cam.source)) sources.push([cam.source, cam.source]);
   return h('section.card', null,
-    h('div.card-head', null, h('h2', null, 'Camera chuyển động (OBS)'), toggle(cam, 'enabled', cam.enabled ? 'Đang bật' : 'Đang tắt', render)),
+    h('div.card-head', null, h('h2', null, 'Nối OBS: camera, đổi cảnh, ẩn hiện nguồn'), toggle(cam, 'enabled', cam.enabled ? 'Đang bật' : 'Đang tắt', render)),
     h(`p.note${note[0] ? `.${note[0]}` : ''}`, { role: 'status' }, note[1]),
     cam.enabled ? [
       h('div.grid3', null,

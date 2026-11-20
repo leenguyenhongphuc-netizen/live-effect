@@ -60,6 +60,10 @@ const rule = (id, name, trigger, action, extra = {}) => ({
     mediaFit: 'cover',
     mediaKey: 'none',
     camera: 'none',
+    scene: '',
+    sceneReturn: true,
+    source: '',
+    sourceMode: 'flash',
     ...action,
   },
   ...extra,
@@ -214,6 +218,10 @@ function sanitizeRule(input, index) {
       mediaFit: oneOf(a.mediaFit, ['cover', 'center'], 'cover'),
       mediaKey: oneOf(a.mediaKey, ['none', 'black', 'green'], 'none'),
       camera: oneOf(a.camera, ['none', 'zoomin', 'zoomout', 'shake', 'tilt', 'spin'], 'none'),
+      scene: str(a.scene, 120),
+      sceneReturn: bool(a.sceneReturn, true),
+      source: str(a.source, 120),
+      sourceMode: oneOf(a.sourceMode, ['flash', 'show', 'hide'], 'flash'),
     },
   };
 }

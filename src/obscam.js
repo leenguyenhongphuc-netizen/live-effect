@@ -81,7 +81,8 @@ export class ObsCamera {
     this.readConfig = readConfig;
     this.WebSocketImpl = WebSocketImpl;
     this.port = port;
-    this.status = { state: 'off', error: '', source: '', sources: [] };
+    this.status = { state: 'off', error: '', source: '', sources: [], linked: false, scene: '', scenes: [] };
+    this.sceneTimer = null;
     this.ws = null;
     this.ready = false;
     this.pending = new Map();
@@ -134,6 +135,7 @@ export class ObsCamera {
       this.ready = false;
       this.#stopAnim();
       this.item = null;
+      this.status = { ...this.status, linked: false };
       if (code === 4009) {
         this.#set({ state: 'error', error: 'OBS đang đặt mật khẩu WebSocket mà Live Effect không đọc được. Trong OBS: Tools → WebSocket Server Settings, bỏ tích “Enable Authentication”.' });
       } else this.#offline();
@@ -183,6 +185,9 @@ export class ObsCamera {
 
   async #locate() {
     const { currentProgramSceneName: scene } = await this.#request('GetCurrentProgramScene');
+    // Danh sách cảnh để chọn trong kịch bản "đổi cảnh". OBS trả từ dưới lên, đảo lại cho đúng thứ tự nhìn thấy.
+    const list = await this.#request('GetSceneList').catch(() => ({}));
+    this.#set({ linked: true, scene, scenes: (list.scenes || []).map((x) => x.sceneName).filter(Boolean).reverse() });
     const video = await this.#request('GetVideoSettings');
     this.canvas = { width: video.baseWidth || 1080, height: video.baseHeight || 1920 };
     const { sceneItems = [] } = await this.#request('GetSceneItemList', { sceneName: scene });
@@ -239,6 +244,50 @@ export class ObsCamera {
     return true;
   }
 
+  /**
+   * Đổi sang một cảnh khác; nếu có `returnSec` thì tự quay về cảnh cũ sau từng đó giây.
+   * @returns {Promise<boolean>}
+   */
+  async scene(name, returnSec = 0) {
+    if (!this.ready || !name || !this.status.scenes.includes(name)) return false;
+    // Đang ở giữa một lần đổi cảnh tạm: vẫn nhớ cảnh gốc ban đầu để quay về đúng chỗ.
+    const home = this.sceneHome || this.status.scene;
+    clearTimeout(this.sceneTimer);
+    this.sceneHome = null;
+    try { await this.#request('SetCurrentProgramScene', { sceneName: name }); } catch { return false; }
+    if (returnSec > 0 && home && home !== name) {
+      this.sceneHome = home;
+      this.sceneTimer = setTimeout(() => {
+        this.sceneHome = null;
+        if (this.ready) this.#request('SetCurrentProgramScene', { sceneName: home }).catch(() => {});
+      }, returnSec * 1000);
+      this.sceneTimer.unref?.();
+    }
+    return true;
+  }
+
+  /**
+   * Hiện, ẩn, hoặc hiện một lúc rồi ẩn một nguồn trong cảnh đang phát.
+   * @param {'show' | 'hide' | 'flash'} mode
+   */
+  async source(name, mode = 'flash', seconds = 5) {
+    if (!this.ready || !name) return false;
+    const sceneName = this.status.scene;
+    try {
+      const { sceneItemId } = await this.#request('GetSceneItemId', { sceneName, sourceName: name });
+      await this.#request('SetSceneItemEnabled', { sceneName, sceneItemId, sceneItemEnabled: mode !== 'hide' });
+      if (mode === 'flash') {
+        const t = setTimeout(() => {
+          if (this.ready) this.#request('SetSceneItemEnabled', { sceneName, sceneItemId, sceneItemEnabled: false }).catch(() => {});
+        }, Math.max(0.5, seconds) * 1000);
+        t.unref?.();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Chuyển động do kịch bản hoặc nút bấm gọi. */
   move(kind, { duration = 2 } = {}) {
     // Chỉ nhận đúng năm kiểu công khai; tên lạ (kể cả tên có sẵn của đối tượng JavaScript) bị từ chối.
@@ -264,6 +313,8 @@ export class ObsCamera {
     this.ws = null;
     // Chờ lệnh trả camera về chỗ cũ được gửi đi rồi mới đóng.
     if (ws) await new Promise((r) => { setTimeout(() => { try { ws.close(); } catch { /* đã đóng */ } r(); }, 60); });
-    this.#set({ state: 'off', error: '', source: '', sources: [] });
+    clearTimeout(this.sceneTimer);
+    this.sceneHome = null;
+    this.#set({ state: 'off', error: '', source: '', sources: [], linked: false, scene: '', scenes: [] });
   }
 }

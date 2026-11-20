@@ -14,7 +14,7 @@ const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 10; i++) { if 
 async function fakeObs({ items, canvas = { baseWidth: 1080, baseHeight: 1920 } } = {}) {
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await new Promise((r) => wss.on('listening', r));
-  const state = { transforms: [], scene: 'Game', items, sockets: new Set() };
+  const state = { transforms: [], calls: [], scene: 'Game', items, sockets: new Set() };
   wss.on('connection', (ws) => {
     state.sockets.add(ws);
     ws.send(JSON.stringify({ op: 0, d: { rpcVersion: 1 } }));
@@ -27,8 +27,16 @@ async function fakeObs({ items, canvas = { baseWidth: 1080, baseHeight: 1920 } }
         GetCurrentProgramScene: { currentProgramSceneName: state.scene },
         GetVideoSettings: canvas,
         GetSceneItemList: { sceneItems: state.items },
+        GetSceneList: { scenes: [{ sceneName: 'Kết thúc' }, { sceneName: 'Cận mặt' }, { sceneName: 'Game' }] },
+        GetSceneItemId: { sceneItemId: 42 },
       }[requestType];
       if (requestType === 'SetSceneItemTransform') state.transforms.push(requestData);
+      if (requestType === 'SetSceneItemEnabled') state.calls.push(['nguồn', requestData.sceneItemId, requestData.sceneItemEnabled]);
+      if (requestType === 'SetCurrentProgramScene') {
+        state.scene = requestData.sceneName;
+        state.calls.push(['cảnh', requestData.sceneName]);
+        setTimeout(() => ws.send(JSON.stringify({ op: 5, d: { eventType: 'CurrentProgramSceneChanged', eventData: { sceneName: state.scene } } })), 5);
+      }
       ws.send(JSON.stringify({ op: 7, d: { requestType, requestId, requestStatus: { result: true, code: 100 }, responseData: data || {} } }));
     });
   });
@@ -372,4 +380,32 @@ test('đồng hồ đếm giờ: quà cộng giờ, tạm dừng, hết giờ th
   await wait(1250);
   assert.deepEqual([up, y.remaining(), y.timerState().running], [1, 0, false]);
   y.close();
+});
+
+test('OBS: đổi cảnh rồi tự quay về, hiện nguồn một lúc rồi ẩn', async () => {
+  const obs = await fakeObs({ items: ITEMS });
+  const cfg = { camera: { enabled: true, source: '', beat: 'off', amount: 2 } };
+  const cam = new ObsCamera({ getConfig: () => cfg, port: obs.port, readConfig: () => null });
+  try {
+    await cam.sync();
+    await until(() => cam.status.state === 'ready');
+    assert.deepEqual(cam.status.scenes, ['Game', 'Cận mặt', 'Kết thúc']);
+    assert.equal(cam.status.scene, 'Game');
+    assert.equal(await cam.scene('Không có'), false); // tên cảnh lạ: không gửi gì sang OBS
+    assert.equal(await cam.scene('Cận mặt', 0.25), true);
+    await until(() => cam.status.scene === 'Cận mặt');
+    // Đổi tiếp sang cảnh khác trong lúc đang tạm đổi: vẫn quay về cảnh gốc ban đầu.
+    assert.equal(await cam.scene('Kết thúc', 0.25), true);
+    await wait(450);
+    assert.deepEqual(obs.state.calls.filter((c) => c[0] === 'cảnh').map((c) => c[1]), ['Cận mặt', 'Kết thúc', 'Game']);
+    await until(() => cam.status.scene === 'Game' && cam.status.state === 'ready');
+
+    obs.state.calls.length = 0;
+    assert.equal(await cam.source('Khung quà', 'flash', 0.5), true);
+    await wait(700);
+    assert.deepEqual(obs.state.calls, [['nguồn', 42, true], ['nguồn', 42, false]]);
+    assert.equal(await cam.source('Khung quà', 'hide'), true);
+    assert.deepEqual(obs.state.calls.at(-1), ['nguồn', 42, false]);
+  } finally { await cam.close(); await obs.close(); }
+  assert.equal(await cam.scene('Game'), false); // đã ngắt thì không làm gì
 });
