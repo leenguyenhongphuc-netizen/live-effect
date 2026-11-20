@@ -122,7 +122,8 @@ export function defaultConfig() {
     scenery: { enabled: false, media: '', key: 'none', opacity: 1 },
     bgm: { enabled: false, tracks: [], volume: 0.5, duck: 'lower', shuffle: false, showCard: true, requests: true, position: 'top-left' },
     auction: { item: '', seconds: 120, extend: true, position: 'top-right' },
-    stage: { cam1: '', cam2: '', beatSwitch: 0, shows: [], zones: defaultZones() },
+    stage: { cam1: '', cam2: '', beatSwitch: 0, auto: true, autoNext: true, shows: [], zones: defaultZones() },
+    lights: { enabled: false, type: 'wled', host: '', url: '', color: '#a78bfa', followStage: true, beat: true },
     game: { enabled: false, title: 'Hộp bí ẩn: ai mở trúng bẫy?', boxes: 12, restart: 8, position: 'bottom' },
     extras: {
       timer: { enabled: false, title: 'Thời gian live', minutes: 30, perCoin: 1, position: 'top-right' },
@@ -393,6 +394,18 @@ export function sanitizeConfig(input) {
         events: Array.isArray(wh.events) ? known.filter((e) => wh.events.includes(e)) : ['gift', 'follow', 'share', 'donate'],
       };
     })(),
+    lights: (() => {
+      const lt = c.lights && typeof c.lights === 'object' ? c.lights : {};
+      return {
+        enabled: bool(lt.enabled, false),
+        type: oneOf(lt.type, ['wled', 'webhook'], 'wled'),
+        host: str(lt.host, 80).trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, ''),
+        url: str(lt.url, 300).trim(),
+        color: /^#[0-9a-f]{6}$/i.test(lt.color) ? lt.color.toLowerCase() : '#a78bfa',
+        followStage: bool(lt.followStage, true),
+        beat: bool(lt.beat, true),
+      };
+    })(),
     stage: (() => {
       const sg = c.stage && typeof c.stage === 'object' ? c.stage : {};
       const shows = (Array.isArray(sg.shows) ? sg.shows : []).slice(0, 30).map((sh, i) => {
@@ -410,7 +423,9 @@ export function sanitizeConfig(input) {
             hold: bool(cu?.hold, false),
           };
         }).sort((a, b) => a.t - b.t);
-        return { id: str(sh?.id, 40).replace(/[^\w-]/g, '') || `show-${i}`, name: str(sh?.name, 60) || 'Bài diễn', track: tr && tr.kind === 'audio' ? tr.name : '', cues };
+        const lk = sh?.look && typeof sh.look === 'object' ? sh.look : {};
+        const look = { tint: /^#[0-9a-f]{6}$/i.test(lk.tint) ? lk.tint.toLowerCase() : '', fog: bool(lk.fog, false) };
+        return { id: str(sh?.id, 40).replace(/[^\w-]/g, '') || `show-${i}`, name: str(sh?.name, 60) || 'Bài diễn', track: tr && tr.kind === 'audio' ? tr.name : '', look, cues };
       });
       const zn = sg.zones && typeof sg.zones === 'object' ? sg.zones : {};
       const zones = Object.fromEntries(Object.entries(defaultZones()).map(([id, def]) => {
@@ -421,7 +436,7 @@ export function sanitizeConfig(input) {
         };
         return [id, { feather: num(z.feather, 0, 45, def.feather), 1: rect(z[1], def[1]), 2: rect(z[2], def[2]) }];
       }));
-      return { cam1: str(sg.cam1, 120), cam2: str(sg.cam2, 120), beatSwitch: Math.round(num(sg.beatSwitch, 0, 64, 0)), shows, zones };
+      return { cam1: str(sg.cam1, 120), cam2: str(sg.cam2, 120), beatSwitch: Math.round(num(sg.beatSwitch, 0, 64, 0)), auto: bool(sg.auto, true), autoNext: bool(sg.autoNext, true), shows, zones };
     })(),
     auction: (() => {
       const au = c.auction && typeof c.auction === 'object' ? c.auction : {};

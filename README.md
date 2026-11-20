@@ -21,7 +21,13 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
 - **Nhạc nền** (tự nhỏ tiếng khi có video, khán giả gõ `!nhac 2` để chọn bài) và **cảnh vật trước ống kính** (video lặp phủ lên hình live).
 - **Đấu giá bằng quà**, **bóng bay quà**, **video nửa màn hình**.
 - **Dịch bình luận** của khán giả nước ngoài sang tiếng của bạn (qua trang phụ đề trong Chrome).
-- **Sân khấu**: bài diễn gồm một bài nhạc và các mốc theo giây (clip, hiệu ứng, zoom, đổi góc máy); hai camera đổi theo mốc, theo nhịp hoặc bấm tay.
+- **Sân khấu cho buổi live 3–4 tiếng**: lên *danh sách diễn* từ trước. Bài có tệp nhạc thì các mốc (clip, hiệu ứng, zoom, đổi góc máy)
+  chạy đúng từng giây và hết bài tự sang bài kế. Bài mà nhạc phát từ phần mềm DJ, Spotify… thì ứng dụng nghe tiếng nhạc và tự nhận ra
+  đoạn lắng, đoạn cao trào để đẩy hình, camera và đèn theo. Mỗi bài có tông màu và sương khói riêng; đổi góc máy có màn khói lướt qua.
+  Trên điện thoại có ba nút diễn tay: *Bài kế*, *Đẩy cao trào*, *Trò chuyện*.
+- **Đèn phòng live**: dây LED chạy WLED, hoặc loại khác qua một link nhận lệnh (Home Assistant, cầu nối của hãng); đèn đổi màu theo bài,
+  sáng lên lúc cao trào, nháy theo nhịp.
+- **Vùng ánh xạ**: đánh dấu trần, tường sau, sàn cho từng góc máy; clip chỉ hiện trong vùng đó, mép mờ dần.
 - **Hũ quà**: quà rơi vào một chiếc hũ trên màn hình, xếp chồng lên nhau; đủ số xu thì hũ vỡ ra ăn mừng rồi bắt đầu lại.
 - **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.
@@ -85,15 +91,16 @@ Mục *Ủng hộ → Nguồn khác*: bật công tắc để có link dạng `h
   ký kết nối qua dịch vụ Euler Stream (miễn phí có giới hạn lượt; có thể nhập khoá riêng ở *Bắt đầu → Nâng cao*).
   TikTok đổi giao thức thì cần cập nhật thư viện.
 - Giọng đọc tiếng Việt cần cài giọng `vi-VN` trong Windows.
-- *Nhạc và nhịp* cần bấm **Bắt đầu nghe** mỗi lần mở ứng dụng. Phần lắc / xoay camera theo nhịp cần nối với OBS và chưa có.
+- *Nhạc và nhịp* cần bấm **Bắt đầu nghe** mỗi lần mở ứng dụng; tự nhận biết cao trào (cho nhạc phát từ ngoài) cũng cần bước này.
+- Nhận biết cao trào dựa trên độ mạnh của nhạc so với mức trung bình khoảng 15 giây gần nhất, nên không biết trước cấu trúc bài hát;
+  bài nào cần chính xác từng giây thì dùng tệp nhạc và đặt mốc. Đèn mới hỗ trợ WLED và link nhận lệnh, chưa có DMX và chưa nối thẳng Tuya / Philips Hue.
 - Nhận chuyển khoản cần tài khoản SePay (bên thứ ba, có gói miễn phí giới hạn số giao dịch). Tên người chuyển không có sẵn
   trong dữ liệu ngân hàng nên thông báo ghi “Một bạn” kèm nội dung chuyển khoản.
 - TikTok có thể hạn chế việc hiện mã nhận tiền trên live; tự cân nhắc theo quy định nền tảng.
 - Video quay bằng iPhone (`.mov`) phát được khi là H.264; video HEVC cần đổi sang MP4 trước.
 - Phụ đề dịch cần Chrome 138 trở lên để có bản dịch; trình duyệt cũ hơn chỉ hiện câu gốc. Camera chuyển động chỉ dùng
   với OBS (cần bật WebSocket Server), không dùng được với TikTok LIVE Studio.
-- Chưa có: dịch bình luận của khán giả, chat YouTube / Facebook, đổi cảnh OBS, hiệu ứng bám theo người (tách nền),
-  bấm hiệu ứng bằng dàn pad MIDI, hũ quà, mini-game, bảng PK.
+- Chưa có: chat YouTube / Facebook, hiệu ứng bám theo người (tách nền), bấm hiệu ứng bằng dàn pad MIDI, bảng PK.
 
 ## Phát triển
 

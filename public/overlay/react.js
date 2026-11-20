@@ -176,7 +176,7 @@ export class Reactive {
     }
 
     if (L.embers) {
-      this.emberDebt += (alive ? 3 + 55 * this.level : 0) * dt;
+      this.emberDebt += (alive ? 3 + 55 * this.level : 0) * dt * (this.boost || 1);
       while (this.emberDebt >= 1 && this.embers.length < 260) {
         this.emberDebt -= 1;
         this.embers.push({ x: rand(0, w), y: h + u, vy: -rand(7, 20) * u, sway: rand(2, 7) * u, f: rand(0.8, 2.2), ph: rand(0, TAU), r: rand(0.14, 0.42) * u, age: 0, life: rand(2, 4.2) });

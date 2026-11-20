@@ -7,6 +7,7 @@ import { Extras } from '/overlay/extras.js';
 import { GameView } from '/overlay/game.js';
 import { Scenery, Bgm } from '/overlay/bgm.js';
 import { Zones } from '/overlay/zones.js';
+import { Atmos } from '/overlay/atmos.js';
 
 // Tham số trên link:
 //   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
@@ -25,6 +26,8 @@ const game = new GameView(document.body);
 const scenery = new Scenery(document.body);
 const bgm = new Bgm(document.body, preview);
 const zones = new Zones(document.body);
+const atmos = new Atmos(document.body);
+let stageCam = 1;
 const showAudio = new Audio();
 showAudio.addEventListener('ended', () => { bgm.duck(false); if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'showEnded' })); });
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
@@ -309,7 +312,16 @@ function onMessage(msg) {
       break;
     case 'bgm': if (has('bgm')) bgm.cmd(msg); break;
     case 'auction': if (has('extras')) extras.onAuction(msg); break;
-    case 'stage': zones.setCam(msg.cam); break;
+    case 'stage':
+      // Đổi góc máy: khói tối lướt qua, vùng ánh xạ dời theo.
+      if (msg.cam !== stageCam) { stageCam = msg.cam; atmos.wipe(); }
+      zones.setCam(msg.cam);
+      break;
+    case 'mood':
+      atmos.setMood(msg);
+      // Cao trào thì lớp theo nhạc (tàn lửa, sét) dày hơn.
+      react.boost = msg.active && msg.level === 'peak' ? 1.8 : msg.active && msg.level === 'calm' ? 0.5 : 1;
+      break;
     case 'zonepreview': zones.preview(msg.cam); break;
     case 'show':
       zones.clear();
@@ -359,4 +371,4 @@ applyWidgets(widgets);
 connect();
 
 // Cho phép kiểm thử tự động đọc trạng thái.
-window.__overlay = { zones, fx, react, jar, extras, game, scenery, bgm, onMessage };
+window.__overlay = { atmos, zones, fx, react, jar, extras, game, scenery, bgm, onMessage };

@@ -235,3 +235,16 @@ html, body {
 .zone.out { opacity: 0; }
 .zone > * { width: 100%; height: 100%; object-fit: cover; display: block; }
 .zone-guide { position: absolute; display: grid; place-items: center; border: calc(var(--u) * 0.25) dashed var(--gold); background: rgba(255, 207, 74, 0.12); font-size: calc(var(--u) * 1.8); font-weight: 700; }
+
+/* Không khí sân khấu */
+#tint { position: fixed; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen; transition: opacity 900ms, background 900ms; }
+#fog { position: fixed; left: -10%; right: -10%; bottom: 0; height: 30vh; pointer-events: none; opacity: 0; transition: opacity 1200ms;
+  background: radial-gradient(60% 90% at 20% 100%, rgba(210, 210, 220, 0.5), transparent 70%), radial-gradient(55% 80% at 70% 100%, rgba(200, 200, 215, 0.45), transparent 70%), linear-gradient(to top, rgba(180, 180, 195, 0.35), transparent);
+  filter: blur(calc(var(--u) * 1.2)); animation: fog-drift 14s ease-in-out infinite alternate; }
+#fog.on { opacity: 0.75; }
+#fog.on[data-level="peak"] { opacity: 1; }
+#fog.on[data-level="calm"] { opacity: 0.5; }
+@keyframes fog-drift { from { transform: translateX(-4%); } to { transform: translateX(4%); } }
+#wipe { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(circle at 50% 60%, rgba(12, 10, 18, 0.96), rgba(12, 10, 18, 0.82)); }
+#wipe.go { animation: wipe 620ms ease-in-out both; }
+@keyframes wipe { 0% { opacity: 0; } 35% { opacity: 1; } 100% { opacity: 0; } }

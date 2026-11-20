@@ -163,7 +163,7 @@ picker.addEventListener('change', () => {
 
 function draw(state) {
   // Chỉ dựng lại lưới nút khi danh sách nút thay đổi, để không giật khi đang bấm.
-  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate, state.camera, state.paused]);
+  const shape = JSON.stringify([state.buttons, state.effects, state.celebrate, state.camera, state.paused, state.stage?.running?.id, state.stage?.level, state.stage?.shows]);
   if (shape === lastShape) return;
   lastShape = shape;
   const mine = state.buttons.map((b) =>
@@ -201,7 +201,20 @@ function draw(state) {
     try { await call('POST', '/r/fire', { paused: !paused }); } catch (err) { if (err.auth) return needPairing(); }
     return refresh();
   });
-  app.replaceChildren(...[sw, pz, mySection, camSection, quickSection].filter(Boolean));
+  // Sân khấu: ba nút diễn tay, chỉ hiện khi đã có danh sách diễn.
+  const sg = state.stage;
+  let stageSection = null;
+  if (sg && sg.shows > 0) {
+    const levels = { calm: 'đoạn lắng', normal: 'bình thường', peak: 'cao trào' };
+    const line = el('p', 'stage-line', sg.running ? `Đang diễn: ${sg.running.name} · ${levels[sg.level] || levels.normal}` : 'Đang trò chuyện');
+    line.id = 'stage-line';
+    const keys = [keyButton(sg.running ? 'Bài kế' : 'Bắt đầu diễn', 'play', { stage: 'next' }, false)];
+    if (sg.running) keys.push(keyButton('Đẩy cao trào', 'fireworks', { stage: 'boost' }, false), keyButton('Trò chuyện', 'volume', { stage: 'talk' }, false));
+    for (const k of keys) k.addEventListener('click', () => setTimeout(refresh, 300));
+    stageSection = el('section', '', el('h2', '', 'Sân khấu'), line, el('div', 'grid', ...keys));
+    stageSection.id = 'stage';
+  }
+  app.replaceChildren(...[sw, pz, stageSection, mySection, camSection, quickSection].filter(Boolean));
 }
 
 function needPairing() {

@@ -18,6 +18,7 @@ import { BoxGame } from './game.js';
 import { Webhook } from './webhook.js';
 import { Auction } from './auction.js';
 import { Stage } from './stage.js';
+import { Lights } from './lights.js';
 import { Engine } from './engine.js';
 import { TikTokSource } from './tiktok.js';
 import { TwitchSource } from './twitch.js';
@@ -99,6 +100,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     type: 'status', tiktok: tiktok.status, twitch: twitch.status, donate: sepay.status, overlays: overlayCount(), hotkeyErrors,
     camera: camera.status,
     webhook: webhook.status,
+    lights: lights.status,
   });
   const widgetsMsg = () => {
     const w = store.config.widgets;
@@ -139,7 +141,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   const unit = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0; };
   const relayAudio = (msg) => {
     if (!store.config.music.enabled) return;
-    if (msg.beat === true) { camera.beat(unit(msg.s)); stage.onBeat(); }
+    if (msg.beat === true) { camera.beat(unit(msg.s)); lights.onBeat(); }
+    stage.onAudio({ level: unit(msg.l), beat: msg.beat === true });
     broadcast('overlay', {
       type: 'audio', b: unit(msg.b), m: unit(msg.m), h: unit(msg.h), l: unit(msg.l), beat: msg.beat === true, s: unit(msg.s),
       bands: Array.isArray(msg.bands) ? msg.bands.slice(0, 12).map((x) => Math.round(unit(Number(x) / 100) * 100)) : [],
@@ -168,9 +171,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     // Hết giờ: chạy các kịch bản có sự kiện "Hết giờ đếm ngược".
     onTimeUp: () => { const ev = { type: 'timer', nickname: 'Đồng hồ' }; record(ev, engine.handle(ev)); },
   });
+  const lights = new Lights({ getConfig: () => store.config, fetchImpl: hookFetch, onStatus: () => broadcast('panel', statusMsg()) });
   const stage = new Stage({
     getConfig: () => store.config,
     emit: (msg) => { broadcast('overlay', msg); if (msg.type === 'stage') broadcast('panel', msg); },
+    onMood: (mood) => {
+      lights.onMood(mood);
+      // Lên cao trào: camera zoom vào một nhịp cho đã mắt.
+      if (mood.level === 'peak') camera.move('zoomin', { duration: 1.6 });
+    },
     // Mốc của bài diễn phát ngay, không xếp hàng: phải rơi đúng giây đã đặt.
     fireCue: (cue) => {
       if (cue.camera !== 'none') camera.move(cue.camera, { duration: 2 });
@@ -348,6 +357,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       overlays: overlayCount(),
       celebrate: store.config.gifts.celebrate,
       paused: queue.paused,
+      stage: { ...stage.state(), shows: store.config.stage.shows.length },
       camera: camera.status.state === 'ready',
       buttons: store.config.rules
         .filter((r) => r.enabled && r.trigger.type === 'button')
@@ -358,6 +368,10 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
     fire: (body) => {
       // Chuyển động camera bấm thẳng từ điện thoại (chỉ khi đã nối OBS).
       if (typeof body.camera === 'string') return camera.move(body.camera, { duration: 2.5 });
+      // Nút diễn tay trên điện thoại: bài kế, đẩy cao trào, về chế độ trò chuyện.
+      if (body.stage === 'next') { stage.next(); return true; }
+      if (body.stage === 'boost') { stage.boost(); return true; }
+      if (body.stage === 'talk') { stage.stop(); return true; }
       if (typeof body.paused === 'boolean') { queue.setPaused(body.paused); return true; }
       if (typeof body.celebrate === 'boolean') {
         store.set({ ...store.config, gifts: { ...store.config.gifts, celebrate: body.celebrate } });
@@ -581,6 +595,9 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       if (body.action === 'zones') { broadcast('overlay', { type: 'zonepreview', cam: Number(body.cam) === 2 ? 2 : 1 }); return sendJson(res, 200, { ok: true }); }
       if (body.action === 'start') { if (!stage.start(String(body.id || ''))) return sendJson(res, 404, { error: 'Không tìm thấy bài diễn' }); }
       else if (body.action === 'stop') stage.stop();
+      else if (body.action === 'next') stage.next();
+      else if (body.action === 'boost') stage.boost();
+      else if (body.action === 'light') lights.set(String(body.color || ''), 200, true);
       else if (body.action === 'cam') stage.setCam(Number(body.cam));
       else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
       return sendJson(res, 200, { stage: stage.state() });
@@ -757,7 +774,7 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
           try {
             const msg = JSON.parse(data);
             if (msg && msg.type === 'done' && typeof msg.id === 'string') queue.done(msg.id);
-            if (msg && msg.type === 'showEnded') stage.stop();
+            if (msg && msg.type === 'showEnded') stage.trackEnded();
           } catch { /* bỏ qua tin hỏng */ }
         });
       }
@@ -776,6 +793,8 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
         ws.send(JSON.stringify(jar.state()));
         ws.send(JSON.stringify(game.state()));
         ws.send(JSON.stringify(auction.state()));
+        ws.send(JSON.stringify(stage.moodState()));
+        ws.send(JSON.stringify(stage.state()));
         for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) ws.send(JSON.stringify(m));
         ws.send(JSON.stringify(engine.topState()));
       } else {

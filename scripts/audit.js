@@ -200,7 +200,9 @@ try {
   await desk.locator('.card:has-text("Hũ quà") input[type=number]').fill('40');
   await sleep(700);
   for (let i = 0; i < 4; i++) { await desk.click('text=Thả thử một quà'); await sleep(250); }
-  await sleep(3500);
+  // Chờ các món nằm yên (máy chậm thì lâu hơn), tối đa 9 giây.
+  await sleep(2500);
+  for (let i = 0; i < 26 && await frame().evaluate(() => window.__overlay.jar.running); i++) await sleep(250);
   const jarState = await frame().evaluate(() => {
     const j = window.__overlay.jar;
     const b = j.box;
@@ -284,6 +286,43 @@ try {
   note((await desk.locator('.rule-text span').first().textContent()).includes('đang diễn'), 'Sân khấu: bảng điều khiển báo bài đang diễn');
   await desk.click('.rule-actions >> text=Dừng');
   await desk.click('#clear-all');
+
+  // Danh sách diễn: không khí theo bài (tông màu, sương khói), đẩy cao trào, bài kế, đèn.
+  {
+    await desk.locator('.rule-edit .field:has-text("Tông màu") select').selectOption('#ff2d55');
+    await desk.locator('.rule-edit .field:has-text("Sương khói") .switch').click();
+    await desk.click('.rule-actions >> text=Xong');
+    await desk.click('text=Thêm bài diễn');
+    await desk.click('.rule-actions >> text=Xong');
+    await desk.locator('#lights-card .switch').first().click();
+    await desk.locator('#lights-card input[type=text]').fill('127.0.0.1:9');
+    await sleep(700);
+    await desk.click('#stage-next');
+    await sleep(1300);
+    const look = () => frame().evaluate(() => ({ tint: getComputedStyle(document.getElementById('tint')).opacity, fog: document.getElementById('fog').className, level: document.getElementById('fog').dataset.level }));
+    const l1 = await look();
+    note(Number(l1.tint) > 0.1 && l1.fog.includes('on'), `Danh sách diễn: bài 1 phủ tông màu và sương khói (độ đậm ${l1.tint})`);
+    note(!(await desk.locator('#side-status').textContent()).includes('null'), 'Thanh trạng thái bên trái không hiện chữ “null”');
+    note((await desk.locator('#live-status').textContent()).includes('Bài 1/2'), 'Danh sách diễn: bảng báo đang ở bài 1/2 và bài kế tiếp');
+    await desk.click('#stage-boost');
+    await sleep(1200);
+    const l2 = await look();
+    note(l2.level === 'peak' && Number(l2.tint) > Number(l1.tint) && (await desk.locator('#live-status').textContent()).includes('cao trào'), 'Đẩy cao trào: hình đậm lên và bảng báo “cao trào”');
+    await desk.screenshot({ path: path.join(shots, '29-danh-sach-dien.png') });
+    await checkLayout(desk, 'Sân khấu (đang diễn)');
+    await desk.click('#stage-next');
+    await sleep(1300);
+    const l3 = await look();
+    note((await desk.locator('#live-status').textContent()).includes('Bài 2/2') && Number(l3.tint) === 0 && !l3.fog.includes('on'), 'Bài kế: sang bài 2, không khí của bài 1 tắt');
+    await desk.click('#light-test');
+    await sleep(900);
+    note(await desk.locator('#lights-card .note.err').count() === 1, 'Đèn: không gọi được đèn thì báo lỗi rõ ràng');
+    await desk.click('#stage-talk');
+    await sleep(500);
+    note((await desk.locator('#live-status').textContent()).includes('trò chuyện'), 'Dừng: về chế độ trò chuyện');
+    await desk.locator('#lights-card .switch').first().click();
+    await sleep(800); // chờ bảng điều khiển lưu xong, kẻo ghi đè cấu hình của bước sau
+  }
 
   // Vùng ánh xạ: clip đặt lên "trần" chỉ chiếm đúng vùng trần, có mép mờ; đổi góc máy thì vùng dời theo.
   {
@@ -413,6 +452,13 @@ try {
     `Điện thoại: thấy các nút riêng (${mineNames.join(' | ')}) và công tắc chúc mừng quà`);
   await checkLayout(phone, 'Điện thoại (390px)');
   await phone.screenshot({ path: path.join(shots, '10-phone.png') });
+  // Nút diễn tay trên điện thoại: bắt đầu diễn, rồi về trò chuyện.
+  await phone.tap('#stage .key >> text=Bắt đầu diễn');
+  await phone.waitForSelector('#stage .key >> text=Trò chuyện');
+  note((await phone.locator('#stage-line').textContent()).includes('Đang diễn') && await phone.locator('#stage .key').count() === 3, 'Điện thoại: bấm Bắt đầu diễn thì hiện Bài kế, Đẩy cao trào, Trò chuyện');
+  await phone.screenshot({ path: path.join(shots, '30-phone-san-khau.png') });
+  await phone.tap('#stage .key >> text=Trò chuyện');
+  await phone.waitForSelector('#stage .key >> text=Bắt đầu diễn');
   await phone.tap('.key.mine >> text=Ăn mừng');
   await sleep(700);
   note((await particles()) > 20, `Bấm nút trên điện thoại: overlay có ${await particles()} hạt hiệu ứng`);

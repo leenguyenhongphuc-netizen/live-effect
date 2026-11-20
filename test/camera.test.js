@@ -588,9 +588,144 @@ test('sân khấu: mốc rơi đúng thứ tự và thời điểm, đổi góc 
     assert.equal(fired.length, 3);
     // Theo nhịp: cứ 4 nhịp đổi góc máy một lần.
     cams.length = 0;
-    for (let i = 0; i < 9; i++) st.onBeat();
+    for (let i = 0; i < 9; i++) st.onAudio({ beat: true });
     assert.deepEqual(cams, [2, 1]);
     cfg.stage.cam2 = '';
     assert.equal(st.setCam(2), false); // chưa khai báo camera 2
   } finally { st.close(); }
+});
+
+test('sân khấu: nghe nhạc để nhận ra đoạn cao trào và đoạn lắng, không đổi qua lại liên tục', async () => {
+  const { MoodTracker } = await import('../src/stage.js');
+  let t = 0;
+  const mood = new MoodTracker(() => t);
+  const feed = (energy, frames) => { const seen = []; for (let i = 0; i < frames; i++) { t += 33; const r = mood.push(energy); if (r) seen.push(r); } return seen; };
+  assert.deepEqual(feed(0.3, 200), []); // nhạc đều: giữ mức bình thường
+  assert.deepEqual(feed(0.9, 60), ['peak']); // nhạc bốc lên: cao trào
+  assert.deepEqual(feed(0.9, 150), []); // điệp khúc kéo dài vẫn là cao trào
+  assert.deepEqual(feed(0.04, 300), ['calm']); // nhạc lắng xuống
+  assert.deepEqual(feed(0.3, 300), ['normal']);
+  // Nhạc giật lên xuống liên tục: mỗi lần đổi phải cách nhau ít nhất 6 giây.
+  const flips = [];
+  for (let k = 0; k < 20; k++) flips.push(...feed(k % 2 ? 0.03 : 0.95, 30));
+  assert.ok(flips.length <= 4, `đổi ${flips.length} lần trong 20 giây`);
+});
+
+test('sân khấu: danh sách diễn tự sang bài kế, không khí theo từng bài, nút đẩy cao trào', async () => {
+  const { Stage } = await import('../src/stage.js');
+  const { sanitizeConfig, defaultConfig } = await import('../src/defaults.js');
+  const cfg = sanitizeConfig({ ...defaultConfig(), stage: { shows: [
+    { id: 'a', name: 'Mở màn', track: 'a.mp3', look: { tint: '#FF2D55', fog: true }, cues: [] },
+    { id: 'b', name: 'DJ', look: { tint: 'do', fog: 1 }, cues: [] },
+  ] } });
+  cfg.stage.shows[0].track = 'a.mp3'; // coi như tệp có trong thư viện
+  assert.deepEqual(cfg.stage.shows.map((s) => s.look), [{ tint: '#ff2d55', fog: true }, { tint: '', fog: false }]);
+  assert.deepEqual([cfg.stage.auto, cfg.stage.autoNext], [true, true]);
+  const out = []; const moods = [];
+  const st = new Stage({ getConfig: () => cfg, emit: (m) => out.push(m), fireCue: () => {}, switchCam: () => {}, onMood: (m) => moods.push(m) });
+  try {
+    assert.equal(st.next(), true); // chưa diễn gì: bắt đầu từ bài đầu
+    assert.deepEqual(moods.at(-1), { type: 'mood', level: 'normal', tint: '#ff2d55', fog: true, active: true });
+    st.trackEnded(); // hết nhạc: tự sang bài kế
+    assert.equal(st.state().running.id, 'b');
+    assert.equal(st.state().running.timed, false);
+    st.trackEnded(); // bài không gắn tệp nhạc không tự kết thúc
+    assert.equal(st.state().running.id, 'b');
+    // Nhạc ngoài bốc lên: tự lên cao trào.
+    for (let i = 0; i < 60; i++) st.onAudio({ level: i < 30 ? 0.2 : 0.95 });
+    assert.equal(st.state().level, 'peak');
+    assert.equal(moods.at(-1).level, 'peak');
+    assert.equal(st.next(), false); // hết danh sách: dừng
+    assert.equal(st.state().running, null);
+    assert.equal(moods.at(-1).active, false);
+    // Tắt tự chuyển bài: hết nhạc thì dừng. Tắt tự diễn: nhạc bốc cũng không đổi mức.
+    cfg.stage.autoNext = false; cfg.stage.auto = false;
+    st.start('a');
+    for (let i = 0; i < 60; i++) st.onAudio({ level: i < 30 ? 0.2 : 0.95 });
+    assert.equal(st.state().level, 'normal');
+    st.boost(0.05);
+    assert.equal(st.state().level, 'peak');
+    await wait(90);
+    assert.equal(st.state().level, 'normal');
+    st.trackEnded();
+    assert.equal(st.state().running, null);
+  } finally { st.close(); }
+});
+
+test('đèn: lệnh WLED và webhook đúng dạng, giới hạn tần suất, đổi theo không khí sân khấu', async () => {
+  const { Lights, parseColor } = await import('../src/lights.js');
+  assert.deepEqual(parseColor('#ff8000'), [255, 128, 0]);
+  assert.equal(parseColor('red'), null);
+  const cfg = { lights: { enabled: false, type: 'wled', host: 'den.local', url: '', color: '#a78bfa', followStage: true, beat: true } };
+  const calls = []; let t = 1000; const status = [];
+  const lights = new Lights({ getConfig: () => cfg, now: () => t, onStatus: (s) => status.push(s), fetchImpl: async (url, init) => { calls.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200 }; } });
+  assert.equal(lights.set('#ff0000', 200), false); // đang tắt
+  cfg.lights.enabled = true;
+  assert.equal(lights.set('#ff0000', 999), true);
+  assert.deepEqual(calls[0], { url: 'http://den.local/json/state', body: { on: true, bri: 255, transition: 2, seg: [{ col: [[255, 0, 0]] }] } });
+  assert.equal(lights.set('#00ff00', 100), false); // lệnh trước chưa xong
+  await wait(5);
+  assert.deepEqual(status, [{ ok: true, error: '' }]);
+  t += 50;
+  assert.equal(lights.set('#00ff00', 100), false); // quá sát lệnh trước
+  t += 200;
+  assert.equal(lights.set('sai', 100), true); // màu sai thì dùng màu mặc định
+  assert.deepEqual(calls[1].body.seg[0].col[0], [167, 139, 250]);
+  await wait(5);
+  // Không khí sân khấu: tông màu của bài, cao trào thì sáng hết cỡ, không bị giới hạn tần suất.
+  lights.onMood({ level: 'peak', tint: '#0000ff', active: true });
+  assert.deepEqual([calls[2].body.bri, calls[2].body.seg[0].col[0]], [255, [0, 0, 255]]);
+  await wait(5);
+  cfg.lights.followStage = false;
+  lights.onMood({ level: 'calm', tint: '', active: true });
+  assert.equal(calls.length, 3);
+  // Webhook: gửi màu và độ sáng cho cầu nối bất kỳ; địa chỉ lạ bị từ chối.
+  cfg.lights.type = 'webhook'; cfg.lights.url = 'http://ha.local:8123/api/webhook/den';
+  t += 500;
+  lights.set('#102030', 80);
+  assert.deepEqual(calls[3], { url: 'http://ha.local:8123/api/webhook/den', body: { color: '#102030', r: 16, g: 32, b: 48, brightness: 80 } });
+  await wait(5);
+  cfg.lights.url = 'file:///etc/passwd'; t += 500;
+  assert.equal(lights.set('#102030', 80), false);
+  assert.equal(status.at(-1).ok, false);
+  cfg.lights.type = 'wled'; cfg.lights.host = 'a/b?x';
+  assert.equal(lights.request([1, 2, 3], 9), null);
+});
+
+test('máy chủ: bắt đầu bài diễn thì overlay nhận không khí, đèn đổi màu; điện thoại bấm bài kế và trò chuyện', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'le-set-'));
+  const lamp = [];
+  const app = await startApp({ dataDir, port: 0, hookFetch: async (url, init) => { lamp.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200 }; } });
+  const base = `http://127.0.0.1:${app.port}`;
+  const call = async (method, url, body) => (await fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
+  const { default: WebSocket } = await import('ws');
+  const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws?role=overlay`); const msgs = [];
+  ws.on('message', (d) => msgs.push(JSON.parse(d)));
+  await new Promise((r) => ws.on('open', r));
+  try {
+    const { config } = await call('GET', '/api/state');
+    config.remote.enabled = true;
+    config.lights = { ...config.lights, enabled: true, host: 'http://den.local/abc' };
+    config.stage.shows = [{ id: 'a', name: 'Một', look: { tint: '#ff2d55', fog: true }, cues: [] }, { id: 'b', name: 'Hai', cues: [] }];
+    const saved = await call('PUT', '/api/config', config);
+    assert.equal(saved.config.lights.host, 'den.local');
+    await until(() => msgs.some((m) => m.type === 'mood'));
+    assert.equal(msgs.find((m) => m.type === 'mood').active, false);
+    msgs.length = 0;
+    const r = await call('POST', '/api/stage', { action: 'start', id: 'a' });
+    assert.equal(r.stage.running.name, 'Một');
+    await until(() => msgs.some((m) => m.type === 'mood') && lamp.length);
+    assert.deepEqual(msgs.find((m) => m.type === 'mood'), { type: 'mood', level: 'normal', tint: '#ff2d55', fog: true, active: true });
+    assert.deepEqual([lamp[0].url, lamp[0].body.seg[0].col[0]], ['http://den.local/json/state', [255, 45, 85]]);
+    // Điện thoại: bài kế, đẩy cao trào, rồi về trò chuyện.
+    const info = await app.remote.info();
+    const rc = async (body) => (await fetch(`http://127.0.0.1:${info.port}/r/fire`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Key': saved.config.remote.token }, body: JSON.stringify(body) })).status;
+    assert.equal(await rc({ stage: 'next' }), 200);
+    assert.equal((await call('POST', '/api/stage', { action: 'cam', cam: 1 })).stage.running.id, 'b');
+    assert.equal(await rc({ stage: 'boost' }), 200);
+    const st = await (await fetch(`http://127.0.0.1:${info.port}/r/state`, { headers: { 'X-Key': saved.config.remote.token } })).json();
+    assert.deepEqual([st.stage.level, st.stage.running.name, st.stage.shows], ['peak', 'Hai', 2]);
+    assert.equal(await rc({ stage: 'talk' }), 200);
+    assert.equal((await call('POST', '/api/stage', { action: 'cam', cam: 1 })).stage.running, null);
+  } finally { ws.close(); await app.close(); }
 });

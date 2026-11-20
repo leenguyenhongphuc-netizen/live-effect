@@ -25,7 +25,7 @@ function h(spec, props, ...kids) {
 
 const S = {
   config: null, status: null, media: [], gifts: [], giftQuery: '', queue: { paused: false, current: null, waiting: [] }, catalog: null, overlayUrl: '', hookUrl: '', capabilities: {}, log: [], remote: null,
-  fans: { size: 0, top: [] }, openTier: null, game: null, auctionState: null, stageState: { running: null, cam: 1 }, openShow: null, timer: { running: false, remaining: 0 },
+  fans: { size: 0, top: [] }, openTier: null, game: null, auctionState: null, stageState: { running: null, cam: 1, level: 'normal' }, openShow: null, timer: { running: false, remaining: 0 },
   view: 'home', openRule: null, guide: 'obs', intensity: 2, obs: null, thumbStamp: Date.now(),
 };
 const fmtVnd = (n) => `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(n) || 0))}đ`;
@@ -570,6 +570,8 @@ function viewGreet() {
 }
 
 // --- Mục: Sân khấu ----------------------------------------------------------
+const TONES = [['', 'Không phủ màu'], ['#ff2d55', 'Đỏ hồng'], ['#ff7a1a', 'Cam lửa'], ['#ffd23f', 'Vàng'], ['#35d07f', 'Xanh lá'], ['#22d3ee', 'Xanh ngọc'], ['#3b82f6', 'Xanh dương'], ['#a78bfa', 'Tím'], ['#f472b6', 'Hồng']];
+const LEVELS = { calm: 'đoạn lắng', normal: 'bình thường', peak: 'cao trào' };
 async function stageDo(body) {
   try { S.stageState = (await api('POST', '/api/stage', body)).stage; render(); } catch (err) { toast(err.message); }
 }
@@ -594,15 +596,21 @@ function showBlock(show) {
   return h('div.rule', { 'data-show': show.id },
     h('div.rule-row', null,
       h('span.dot' + (run ? '.ok' : ''), { 'aria-hidden': 'true' }),
-      h('div.rule-text', null, h('b', null, show.name), h('span', null, `${show.track || 'không có nhạc'} · ${show.cues.length} mốc${run ? ' · đang diễn' : ''}`)),
+      h('div.rule-text', null, h('b', null, show.name), h('span', null, `${sg.shows.indexOf(show) + 1}. ${show.track || 'nhạc ngoài (DJ, Spotify…)'} · ${show.cues.length} mốc${run ? ' · đang diễn' : ''}`)),
       h('div.rule-actions', null,
         run ? h('button.btn', { type: 'button', onclick: () => stageDo({ action: 'stop' }) }, 'Dừng')
           : h('button.btn.primary', { type: 'button', onclick: () => stageDo({ action: 'start', id: show.id }) }, 'Diễn'),
+        h('button.btn.icon.ghost', { type: 'button', title: 'Đưa lên trước', 'aria-label': `Đưa bài ${show.name} lên trước`, disabled: sg.shows[0] === show, onclick: () => {
+          const i = sg.shows.indexOf(show); sg.shows.splice(i - 1, 0, sg.shows.splice(i, 1)[0]); save(); render();
+        } }, '↑'),
         h('button.btn', { type: 'button', 'aria-expanded': String(open), onclick: () => { S.openShow = open ? null : show.id; render(); } }, open ? 'Xong' : 'Sửa'))),
     open ? h('div.rule-edit', null,
       h('div.grid2', null,
         field('Tên bài diễn', textInput(show, 'name')),
-        field('Bài nhạc', select(show, 'track', [['', 'Không có nhạc'], ...audio.map((m) => [m, m])]), audio.length ? null : 'Thêm tệp nhạc ở Hiển thị → Thư viện.')),
+        field('Bài nhạc', select(show, 'track', [['', 'Nhạc phát từ ngoài (DJ, Spotify…)'], ...audio.map((m) => [m, m])], render),
+          show.track ? 'Ứng dụng tự phát bài này; các mốc chạy đúng từng giây, hết bài tự sang bài kế.' : 'Ứng dụng chỉ nghe tiếng nhạc và tự nhận ra đoạn lắng, đoạn cao trào. Cần bấm “Bắt đầu nghe” ở mục Nhạc và nhịp.'),
+        field('Tông màu của bài', select(show.look, 'tint', TONES), 'Phủ nhẹ lên khung hình và đổi màu đèn phòng.'),
+        h('div.field', null, h('span', null, 'Sương khói'), toggle(show.look, 'fog', 'Khói là là dưới sàn'))),
       h('h3', null, 'Các mốc theo thời gian'),
       show.cues.length ? [...show.cues].sort((a, b) => a.t - b.t).map(cueRow) : h('p.small.muted', null, 'Chưa có mốc nào. Mỗi mốc là một việc xảy ra ở đúng một giây của bài nhạc.'),
       h('div.rule-foot', null,
@@ -631,6 +639,46 @@ function zoneCard() {
     h('div.btn-row', null, h('button.btn', { type: 'button', onclick: show }, 'Hiện khung các vùng trên xem thử')));
 }
 
+function liveCard() {
+  const sg = S.config.stage;
+  const st = S.stageState;
+  const run = st.running;
+  const idx = run ? sg.shows.findIndex((s) => s.id === run.id) : -1;
+  const nxt = sg.shows[idx + 1];
+  return h('section.card', { id: 'live-card' },
+    h('div.card-head', null, h('h2', null, 'Đang diễn')),
+    h('p.note' + (run ? '.ok' : ''), { role: 'status', id: 'live-status' }, run
+      ? `Bài ${idx + 1}/${sg.shows.length}: ${run.name} · không khí: ${LEVELS[st.level] || LEVELS.normal}${nxt ? ` · kế tiếp: ${nxt.name}` : ' · bài cuối'}`
+      : 'Đang trò chuyện, chưa diễn bài nào.'),
+    h('div.btn-row', null,
+      h('button.btn.primary', { type: 'button', id: 'stage-next', disabled: !sg.shows.length, onclick: () => stageDo({ action: 'next' }) }, run ? (nxt ? 'Bài kế' : 'Kết thúc') : 'Bắt đầu danh sách'),
+      h('button.btn', { type: 'button', id: 'stage-boost', disabled: !run, onclick: () => stageDo({ action: 'boost' }) }, 'Đẩy cao trào 10 giây'),
+      h('button.btn.ghost', { type: 'button', id: 'stage-talk', disabled: !run, onclick: () => stageDo({ action: 'stop' }) }, 'Dừng, về trò chuyện')),
+    toggle(sg, 'auto', 'Tự diễn theo nhạc: nhạc bốc thì hình và đèn bốc theo, nhạc lắng thì dịu lại'),
+    toggle(sg, 'autoNext', 'Hết bài nhạc thì tự sang bài kế trong danh sách'),
+    h('p.small.muted', null, 'Ba nút trên cũng có trên điện thoại để bấm ngay lúc đang diễn.'));
+}
+
+function lightsCard() {
+  const lt = S.config.lights;
+  const st = S.status.lights || { ok: false, error: '' };
+  return h('section.card', { id: 'lights-card' },
+    h('div.card-head', null, h('h2', null, 'Đèn phòng live'), toggle(lt, 'enabled', lt.enabled ? 'Đang bật' : 'Đang tắt', render)),
+    h('p.muted', null, 'Đèn RGB đổi màu theo tông của từng bài, sáng lên lúc cao trào và dịu lại lúc lắng.'),
+    lt.enabled ? [
+      h('div.grid3', null,
+        field('Loại đèn', select(lt, 'type', [['wled', 'Dây LED chạy WLED'], ['webhook', 'Loại khác (qua link)']], render)),
+        lt.type === 'wled'
+          ? field('Địa chỉ của đèn', textInput(lt, 'host', { placeholder: '192.168.1.50' }), 'Xem trong ứng dụng WLED trên điện thoại. Đèn và máy tính chung Wi-Fi.')
+          : field('Link nhận lệnh', textInput(lt, 'url', { placeholder: 'http://…', inputMode: 'url' }), 'Ứng dụng gửi màu và độ sáng tới link này; dùng với Home Assistant hoặc cầu nối của hãng đèn.'),
+        field('Màu khi bài không có tông', select(lt, 'color', TONES.slice(1)))),
+      toggle(lt, 'followStage', 'Đổi theo bài đang diễn'),
+      toggle(lt, 'beat', 'Nháy theo nhịp lúc cao trào'),
+      st.error ? h('p.note.err', { role: 'alert' }, st.error) : st.ok ? h('p.note.ok', { role: 'status' }, 'Đèn đã nhận lệnh.') : null,
+      h('div.btn-row', null, h('button.btn', { type: 'button', id: 'light-test', onclick: () => stageDo({ action: 'light', color: lt.color }) }, 'Thử đèn')),
+    ] : null);
+}
+
 function viewStage() {
   const sg = S.config.stage;
   const scenes = obsScenes();
@@ -639,11 +687,12 @@ function viewStage() {
     : textInput(sg, key, { placeholder: 'Tên cảnh trong OBS' }, render));
   const both = sg.cam1 && sg.cam2;
   return h('div.view', null,
-    head('Sân khấu', 'Biến buổi live thành một màn diễn: nhạc, clip, hiệu ứng và góc máy chạy khớp nhau.',
+    head('Sân khấu', 'Lên danh sách bài cho cả buổi live; mỗi bài có không khí riêng, hình, đèn và góc máy chạy theo nhạc.',
       h('button.btn.primary', { type: 'button', onclick: () => {
-        const show = { id: `show-${Date.now().toString(36)}`, name: 'Bài diễn mới', track: '', cues: [] };
+        const show = { id: `show-${Date.now().toString(36)}`, name: 'Bài diễn mới', track: '', look: { tint: '', fog: false }, cues: [] };
         sg.shows.push(show); S.openShow = show.id; save(); render();
       } }, icon('plus'), 'Thêm bài diễn')),
+    liveCard(),
     h('section.card', null,
       h('div.card-head', null, h('h2', null, 'Hai góc máy')),
       h('p.muted', null, 'Tạo hai cảnh trong OBS, mỗi cảnh một camera (ví dụ cận mặt và toàn thân), rồi chọn ở đây. Cần bật “Nối OBS” ở mục Nhạc và nhịp.'),
@@ -652,6 +701,8 @@ function viewStage() {
         field('Tự đổi sau mỗi (nhịp)', numInput(sg, 'beatSwitch', { min: 0, max: 64 }), 'Đặt 0 để không tự đổi. Cần đang nghe nhạc.')),
       h('div.btn-row', null, [1, 2].map((i) => h('button.btn' + (S.stageState.cam === i ? '.primary' : ''), { type: 'button', disabled: !both, onclick: () => stageDo({ action: 'cam', cam: i }) }, `Camera ${i}`)))),
     zoneCard(),
+    lightsCard(),
+    h('h2.list-title', null, 'Danh sách diễn'),
     h('div.rules', null, sg.shows.length ? sg.shows.map(showBlock) : h('p.empty', null, 'Chưa có bài diễn nào. Một bài diễn gồm một bài nhạc và các mốc: giây nào phát clip gì, zoom thế nào, đổi sang góc máy nào.')));
 }
 
@@ -1276,8 +1327,8 @@ function renderStatus() {
     S.config.donate.enabled && S.config.donate.sepayToken ? h('div.stat', null,
       h(`span.dot${{ connected: '.ok', connecting: '.wait', error: '.err' }[S.status.donate?.state] || ''}`),
       h('span', null, S.status.donate?.state === 'connected' ? 'Chuyển khoản: đang theo dõi' : S.status.donate?.state === 'error' ? 'Chuyển khoản: lỗi SePay' : 'Chuyển khoản: đang nối…')) : null,
-  ].filter(Boolean),
-    S.queue.paused ? h('div.stat', null, h('span.dot.wait'), h('span', null, `Hiệu ứng đang tạm dừng${S.queue.waiting.length ? ` · ${S.queue.waiting.length} đang chờ` : ''}`)) : null);
+    S.queue.paused ? h('div.stat', null, h('span.dot.wait'), h('span', null, `Hiệu ứng đang tạm dừng${S.queue.waiting.length ? ` · ${S.queue.waiting.length} đang chờ` : ''}`)) : null,
+  ].filter(Boolean));
 }
 
 function render() {
