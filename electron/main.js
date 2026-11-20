@@ -1,6 +1,6 @@
 // Vỏ Windows của Live Effect: khởi động lõi (máy chủ cục bộ), mở cửa sổ bảng điều khiển
 // và đăng ký phím tắt toàn hệ thống cho các kịch bản "Nút bấm tay".
-import { app, BrowserWindow, Menu, dialog, globalShortcut, shell } from 'electron';
+import { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, session, shell } from 'electron';
 import { startApp } from '../src/server.js';
 
 let win = null;
@@ -41,6 +41,18 @@ async function createWindow() {
     },
   });
   const origin = new URL(core.url).origin;
+  const ours = (url) => { try { return new URL(url).origin === origin; } catch { return false; } };
+  // Chỉ bảng điều khiển của chính ứng dụng được thu âm (nghe nhạc để bắt nhịp) và ghi clipboard.
+  const allowed = new Set(['media', 'clipboard-sanitized-write']);
+  session.defaultSession.setPermissionRequestHandler((wc, permission, done) => done(ours(wc.getURL()) && allowed.has(permission)));
+  session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin) => ours(requestingOrigin) && allowed.has(permission));
+  // "Âm thanh đang phát trên máy tính": cấp thẳng âm thanh hệ thống, không hiện hộp thoại chọn màn hình.
+  session.defaultSession.setDisplayMediaRequestHandler((request, done) => {
+    if (!ours(request.securityOrigin)) { done({}); return; }
+    desktopCapturer.getSources({ types: ['screen'] })
+      .then((sources) => done({ video: sources[0], audio: 'loopback' }))
+      .catch(() => done({}));
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };

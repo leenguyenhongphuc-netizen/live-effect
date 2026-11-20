@@ -6,6 +6,9 @@ OBS Studio, TikTok LIVE Studio, Streamlabs, vMix… qua **một link overlay duy
 - **Tự động theo sự kiện TikTok LIVE**: quà, follow, tim, chia sẻ, bình luận có từ khoá, người vào phòng.
 - **Video hiệu ứng toàn màn hình**: WebM trong suốt, hoặc MP4 nền đen / nền xanh được **xoá nền ngay lúc phát**.
 - **Hiệu ứng riêng cho từng người**: phát video chào khi một ID TikTok cụ thể vào phòng hoặc tặng quà.
+- **Menu quà tặng**: danh sách quà thật của TikTok, gán hiệu ứng riêng cho từng món, và một công tắc tổng
+  *Chúc mừng quà tặng* bật tắt được ngay trên điện thoại.
+- **Nhạc và nhịp**: nghe bài nhạc đang phát, bắt nhịp, rồi cho sét, chớp màu, tàn lửa, viền sáng và sóng nhạc chạy theo.
 - **Điều khiển bằng điện thoại / máy tính bảng**: quét mã QR là có bảng nút bấm, không cần Stream Deck, không cần cài app.
 - 8 hiệu ứng có sẵn (pháo giấy, pháo hoa, tim, sao, xu, tuyết, mưa quà, viền sáng), 6 âm thanh, thông báo, khung bình luận, thanh mục tiêu, giọng đọc.
 - Phím tắt toàn hệ thống cho stream game (YouTube, Facebook, Twitch qua OBS).
@@ -41,7 +44,9 @@ mọi lệnh phải kèm mã ghép nối ngẫu nhiên nằm trong mã QR. *Đ�
   ký kết nối qua dịch vụ Euler Stream (miễn phí có giới hạn lượt; có thể nhập khoá riêng ở *Bắt đầu → Nâng cao*).
   TikTok đổi giao thức thì cần cập nhật thư viện.
 - Giọng đọc tiếng Việt cần cài giọng `vi-VN` trong Windows.
-- Chưa có: nhận chuyển khoản ngân hàng → hiệu ứng, điều khiển OBS (đổi cảnh), ảnh thu nhỏ cho nút video, kết nối chat YouTube.
+- *Nhạc và nhịp* cần bấm **Bắt đầu nghe** mỗi lần mở ứng dụng. Phần lắc / xoay camera theo nhịp cần nối với OBS và chưa có.
+- Chưa có: phụ đề dịch đa ngôn ngữ, nhận chuyển khoản ngân hàng → hiệu ứng, điều khiển OBS (đổi cảnh, lắc camera),
+  bấm hiệu ứng bằng dàn pad MIDI, ảnh thu nhỏ cho nút video, kết nối chat YouTube.
 
 ## Phát triển
 

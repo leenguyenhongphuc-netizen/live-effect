@@ -17,7 +17,7 @@ html, body {
   font-family: var(--font);
   color: var(--paper);
 }
-#fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#fx, #react { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* Viền sáng quanh khung hình */
 #border {

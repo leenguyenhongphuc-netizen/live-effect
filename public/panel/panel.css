@@ -202,6 +202,17 @@ details.adv[open] > summary { margin-bottom: 10px; }
 .qr svg { display: block; width: 100%; height: 100%; }
 @media (max-width: 620px) { .phone-pair { grid-template-columns: 1fr; justify-items: center; } }
 
+/* --- Nhạc và nhịp ---------------------------------------------------------- */
+.meter { display: flex; align-items: center; gap: 12px; }
+.meter-track { flex: 1; height: 10px; border-radius: 5px; background: var(--bg); overflow: hidden; }
+.meter-track i { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 5px; }
+.meter .small { flex: none; min-width: 108px; text-align: right; font-variant-numeric: tabular-nums; }
+.lamp { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--line); }
+.lamp.on { background: var(--accent); }
+.layers { display: flex; flex-direction: column; }
+.layer { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; border-top: 1px solid var(--line); }
+.layer:first-child { border-top: 0; }
+
 /* --- Quà tặng -------------------------------------------------------------- */
 .gift-list { display: flex; flex-direction: column; max-height: 56vh; overflow-y: auto; margin: 0 -8px; padding: 0 8px; }
 .gift-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 60px; padding: 8px 0; border-top: 1px solid var(--line); }

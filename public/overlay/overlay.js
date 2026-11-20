@@ -1,6 +1,7 @@
 import { Fx } from '/overlay/fx.js';
 import { playSound, stopSounds } from '/overlay/sound.js';
 import { keyedCanvas } from '/overlay/key.js';
+import { Reactive } from '/overlay/react.js';
 
 // Tham số trên link:
 //   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
@@ -12,6 +13,7 @@ const has = (name) => layers.has(name);
 
 const $ = (id) => document.getElementById(id);
 const fx = new Fx($('fx'));
+const react = new Reactive($('react'));
 const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border') };
 const nf = new Intl.NumberFormat('vi-VN');
 const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
@@ -180,7 +182,11 @@ function onMessage(msg) {
       pushAlert(msg.alert, msg.avatar, msg.duration);
       pushMedia(msg.media, msg.duration, msg.mediaFit, msg.mediaKey);
       break;
-    case 'widgets': applyWidgets(msg.widgets); break;
+    case 'widgets':
+      applyWidgets(msg.widgets);
+      if (has('fx')) react.setConfig(msg.music);
+      break;
+    case 'audio': if (has('fx')) react.onAudio(msg); break;
     case 'chat': addChat(msg); break;
     case 'goal': setGoal(msg); break;
     case 'clear': clearAll(); break;
@@ -205,4 +211,4 @@ applyWidgets(widgets);
 connect();
 
 // Cho phép kiểm thử tự động đọc trạng thái.
-window.__overlay = { fx, onMessage };
+window.__overlay = { fx, react, onMessage };

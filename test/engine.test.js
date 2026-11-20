@@ -227,3 +227,22 @@ test('danh mục quà: chuẩn hoá dữ liệu TikTok, gộp không mất thôn
   assert.equal(ev.coins, 59998);
   assert.equal(ev.giftImage, 'https://cdn/lion.png');
 });
+
+test('bắt nhịp: đúng nhịp của tiếng trống, không bắt nhầm tiếng đều hay im lặng', async () => {
+  const { BeatDetector } = await import('../public/panel/beat.js');
+  const run = (energyAt, seconds = 12) => {
+    const d = new BeatDetector();
+    let beats = 0;
+    for (let t = 0; t < seconds * 1000; t += 22) if (d.push(energyAt(t), t).beat) beats += 1;
+    return { beats, bpm: d.bpm };
+  };
+  // Trống 120 nhịp/phút trên nền nhạc đều: mỗi 500 ms một cú, tắt dần.
+  const kick = run((t) => Math.min(1, 0.25 + 0.75 * Math.exp(-(t % 500) / 70)));
+  assert.ok(kick.beats >= 21 && kick.beats <= 25, `đếm được ${kick.beats} nhịp trong 12 giây`);
+  assert.ok(Math.abs(kick.bpm - 120) <= 4, `đo được ${kick.bpm} nhịp/phút`);
+  const fast = run((t) => Math.min(1, 0.2 + 0.8 * Math.exp(-(t % 375) / 60)));
+  assert.ok(Math.abs(fast.bpm - 160) <= 6, `đo được ${fast.bpm} nhịp/phút`);
+  assert.equal(run(() => 0.6).beats, 0);
+  assert.equal(run(() => 0).beats, 0);
+  assert.equal(run((t) => 0.5 + 0.02 * Math.sin(t / 40)).beats, 0);
+});

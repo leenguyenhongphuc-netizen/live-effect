@@ -45,7 +45,17 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
   };
   const overlayCount = () => [...clients].filter((c) => c.role === 'overlay' && !c.preview).length;
   const statusMsg = () => ({ type: 'status', tiktok: tiktok.status, overlays: overlayCount(), hotkeyErrors });
-  const widgetsMsg = () => ({ type: 'widgets', widgets: store.config.widgets });
+  const widgetsMsg = () => ({ type: 'widgets', widgets: store.config.widgets, music: store.config.music });
+
+  // Khung phân tích nhạc từ bảng điều khiển: kiểm tra từng số rồi mới chuyển cho overlay.
+  const unit = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0; };
+  const relayAudio = (msg) => {
+    if (!store.config.music.enabled) return;
+    broadcast('overlay', {
+      type: 'audio', b: unit(msg.b), m: unit(msg.m), h: unit(msg.h), l: unit(msg.l), beat: msg.beat === true, s: unit(msg.s),
+      bands: Array.isArray(msg.bands) ? msg.bands.slice(0, 12).map((x) => Math.round(unit(Number(x) / 100) * 100)) : [],
+    });
+  };
 
   const engine = new Engine(() => store.config, (msg) => broadcast('overlay', msg));
 
@@ -306,6 +316,15 @@ export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, 
       };
       clients.add(client);
       ws.on('pong', () => { client.dead = false; });
+      if (client.role === 'panel') {
+        ws.on('message', (data) => {
+          if (data.length > 600) return;
+          try {
+            const msg = JSON.parse(data);
+            if (msg && msg.type === 'audio') relayAudio(msg);
+          } catch { /* bỏ qua tin hỏng */ }
+        });
+      }
       if (client.role === 'overlay') {
         ws.send(JSON.stringify(widgetsMsg()));
         ws.send(JSON.stringify(engine.goalState()));

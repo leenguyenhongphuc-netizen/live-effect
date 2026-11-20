@@ -72,6 +72,10 @@ export function defaultConfig() {
     tts: { enabled: false, chat: true, gift: true, follow: true, voice: '', rate: 1, maxLength: 80 },
     remote: { enabled: false, token: '' },
     gifts: { celebrate: true },
+    music: {
+      enabled: false, source: 'system', deviceId: '', sensitivity: 1, palette: 'storm',
+      layers: { lightning: true, flash: true, embers: true, pulse: true, bars: false },
+    },
     rules: [
       rule('r-follow', 'Cảm ơn follow', { type: 'follow' }, {
         effect: 'hearts', text: 'Cảm ơn {user} đã follow!', sound: 'ding',
@@ -182,6 +186,8 @@ export function sanitizeConfig(input) {
   const tts = c.tts && typeof c.tts === 'object' ? c.tts : {};
   const rm = c.remote && typeof c.remote === 'object' ? c.remote : {};
   const gf = c.gifts && typeof c.gifts === 'object' ? c.gifts : {};
+  const mu = c.music && typeof c.music === 'object' ? c.music : {};
+  const ly = mu.layers && typeof mu.layers === 'object' ? mu.layers : {};
   const al = w.alerts || {};
   const ch = w.chat || {};
   const go = w.goal || {};
@@ -232,6 +238,14 @@ export function sanitizeConfig(input) {
       token: /^[0-9a-f]{32}$/.test(rm.token) ? rm.token : '',
     },
     gifts: { celebrate: bool(gf.celebrate, true) },
+    music: {
+      enabled: bool(mu.enabled, false),
+      source: oneOf(mu.source, ['system', 'device'], 'system'),
+      deviceId: str(mu.deviceId, 200),
+      sensitivity: num(mu.sensitivity, 0.5, 2, 1),
+      palette: oneOf(mu.palette, ['storm', 'fire', 'ice', 'neon'], 'storm'),
+      layers: Object.fromEntries(Object.entries(d.music.layers).map(([k, v]) => [k, bool(ly[k], v)])),
+    },
     rules,
   };
 }

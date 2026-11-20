@@ -2,6 +2,7 @@
 // mỗi mục là một hàm vẽ lại khi cấu trúc thay đổi; gõ chữ thì chỉ lưu, không vẽ lại.
 
 import { icon } from '/remote/icons.js';
+import { AudioReactive, listInputs } from '/panel/audio.js';
 
 /** Dựng phần tử: h('div.card', { onclick }, con1, con2). Chuỗi luôn thành text, không bao giờ là HTML. */
 function h(spec, props, ...kids) {
@@ -87,12 +88,12 @@ function textInput(obj, key, props = {}, after) {
     oninput: (e) => { obj[key] = e.target.value; save(); after?.(e); },
   });
 }
-function numInput(obj, key, { min = 0, max = 1e9, step = 1 } = {}) {
+function numInput(obj, key, { min = 0, max = 1e9, step = 1 } = {}, after) {
   return h('input.input', {
     type: 'number', value: obj[key], min, max, step, inputMode: 'decimal',
     oninput: (e) => {
       const n = Number(e.target.value);
-      if (e.target.value !== '' && Number.isFinite(n)) { obj[key] = Math.min(max, Math.max(min, n)); save(); }
+      if (e.target.value !== '' && Number.isFinite(n)) { obj[key] = Math.min(max, Math.max(min, n)); save(); after?.(); }
     },
   });
 }
@@ -440,6 +441,73 @@ function viewGifts() {
         : h('p.muted', null, 'Danh sách quà được tải từ TikTok ở lần kết nối với phiên live đầu tiên, rồi lưu lại trong máy. Trong lúc chờ, bạn vẫn tạo được kịch bản quà theo tên ở mục Kịch bản.')));
 }
 
+// --- Mục: Nhạc và nhịp ------------------------------------------------------
+let panelWs = null;
+const M = { error: '', inputs: [], bar: null, lamp: null, bpm: null };
+const audio = new AudioReactive((frame) => {
+  if (panelWs?.readyState === 1) panelWs.send(JSON.stringify({ type: 'audio', ...frame }));
+  if (!M.bar?.isConnected) return;
+  M.bar.style.width = `${Math.round(frame.b * 100)}%`;
+  if (frame.beat) { M.lamp.classList.add('on'); setTimeout(() => M.lamp?.classList.remove('on'), 110); }
+  M.bpm.textContent = frame.bpm ? `${frame.bpm} nhịp/phút` : 'đang dò nhịp…';
+});
+audio.onEnded = () => { M.error = 'Nguồn âm thanh đã dừng. Bấm “Bắt đầu nghe” để nghe lại.'; if (S.view === 'music') render(); };
+
+async function startListening() {
+  const m = S.config.music;
+  try {
+    await audio.start({ source: m.source, deviceId: m.deviceId, sensitivity: m.sensitivity });
+    M.error = '';
+  } catch (err) {
+    M.error = err.name === 'NotAllowedError' ? 'Chưa được phép thu âm thanh. Hãy bấm Cho phép khi được hỏi, rồi thử lại.'
+      : err.name === 'NotFoundError' || err.name === 'OverconstrainedError' ? 'Không tìm thấy thiết bị thu này. Hãy chọn nguồn âm thanh khác.'
+        : err.message || 'Không nghe được âm thanh.';
+  }
+  M.inputs = await listInputs();
+  if (S.view === 'music') render();
+}
+
+function viewMusic() {
+  const m = S.config.music;
+  const pick = { src: m.source === 'device' ? `dev:${m.deviceId}` : 'system' };
+  const sources = [['system', 'Âm thanh đang phát trên máy tính'], ...M.inputs.map((d) => [`dev:${d.id}`, d.name])];
+  if (!sources.some(([v]) => v === pick.src)) sources.push([pick.src, 'Thiết bị đã chọn trước đây']);
+  M.bar = h('i');
+  M.lamp = h('span.lamp', { 'aria-hidden': 'true' });
+  M.bpm = h('span.small.muted', null, audio.running ? 'đang dò nhịp…' : 'chưa nghe');
+  const LAYERS = [
+    ['lightning', 'Sét đánh theo nhịp', 'Tia sét chạy từ mép trên xuống ở mỗi nhịp mạnh.'],
+    ['flash', 'Chớp màu', 'Cả khung hình ửng màu nhẹ theo tiếng trống.'],
+    ['embers', 'Tàn lửa', 'Đốm sáng bay lên, nhạc càng lớn càng dày.'],
+    ['pulse', 'Viền đập', 'Viền sáng quanh khung co giãn theo âm trầm.'],
+    ['bars', 'Sóng nhạc', 'Mười hai cột nhảy theo dải âm ở cạnh dưới.'],
+  ];
+  return h('div.view', null,
+    head('Nhạc và nhịp', 'Hiệu ứng tự chạy theo bài nhạc đang phát, hợp với live nhảy, live hát và đánh nhạc.'),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Nghe nhạc'),
+        toggle(m, 'enabled', m.enabled ? 'Đang bật' : 'Đang tắt', () => { if (m.enabled) startListening(); else { audio.stop(); render(); } })),
+      h('div.grid2', null,
+        field('Nguồn âm thanh', select(pick, 'src', sources, () => {
+          m.source = pick.src === 'system' ? 'system' : 'device';
+          m.deviceId = pick.src === 'system' ? '' : pick.src.slice(4);
+          save();
+          if (audio.running) startListening();
+        }), S.capabilities.hotkeys ? 'Chọn dòng đầu để nghe đúng bài nhạc đang phát qua loa hoặc tai nghe.' : 'Mở trong trình duyệt: khi được hỏi, chọn màn hình hoặc tab và bật “Chia sẻ âm thanh”.'),
+        field('Độ nhạy bắt nhịp', numInput(m, 'sensitivity', { min: 0.5, max: 2, step: 0.1 }, () => audio.setSensitivity(m.sensitivity)), 'Từ 0,5 (chỉ nhịp rõ) đến 2 (bắt cả nhịp nhẹ).')),
+      h('div.meter', { role: 'img', 'aria-label': 'Mức âm trầm và nhịp' }, M.lamp, h('div.meter-track', null, M.bar), M.bpm),
+      M.error ? h('p.note.err', { role: 'alert' }, M.error) : null,
+      m.enabled ? h('div.btn-row', null, audio.running
+        ? h('button.btn', { type: 'button', onclick: () => { audio.stop(); render(); } }, 'Dừng nghe')
+        : h('button.btn.primary', { type: 'button', onclick: startListening }, 'Bắt đầu nghe')) : null),
+    h('section.card', null,
+      h('div.card-head', null, h('h2', null, 'Lớp hiệu ứng')),
+      h('div.layers', null, LAYERS.map(([key, name, help]) => h('div.layer', null,
+        h('div.rule-text', null, h('b', null, name), h('span', null, help)), toggle(m.layers, key)))),
+      field('Tông màu', select(m, 'palette', [['storm', 'Bão tím'], ['fire', 'Lửa đỏ cam'], ['ice', 'Băng xanh'], ['neon', 'Neon đổi màu theo nhịp']])),
+      h('p.small.muted', null, 'Chớp màu được giữ ở mức nhẹ và không quá 3 lần mỗi giây, để an toàn cho người xem nhạy cảm với ánh sáng nhấp nháy.')));
+}
+
 // --- Mục: Điện thoại --------------------------------------------------------
 function viewPhone() {
   const r = S.remote || {};
@@ -585,6 +653,7 @@ const VIEWS = [
   ['deck', 'Bảng hiệu ứng', 'deck', viewDeck],
   ['rules', 'Kịch bản', 'rules', viewRules],
   ['gifts', 'Quà tặng', 'giftrain', viewGifts],
+  ['music', 'Nhạc và nhịp', 'music', viewMusic],
   ['phone', 'Điện thoại', 'phone', viewPhone],
   ['display', 'Hiển thị', 'layout', viewDisplay],
   ['log', 'Nhật ký', 'log', viewLog],
@@ -645,6 +714,7 @@ if ('speechSynthesis' in window) {
 // --- Nhận cập nhật trực tiếp ------------------------------------------------
 function connectWs() {
   const ws = new WebSocket(`ws://${location.host}/ws?role=panel`);
+  panelWs = ws;
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'status') { S.status = msg; softRender(); }

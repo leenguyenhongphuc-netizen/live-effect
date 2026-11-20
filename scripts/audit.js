@@ -13,7 +13,11 @@ const shots = path.resolve(process.argv[2] || path.join(os.tmpdir(), 'live-effec
 fs.mkdirSync(shots, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-effect-audit-data-'));
 const app = await startApp({ dataDir, port: 0 });
-const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+// Micro giả phát một tệp trống 120 nhịp/phút, để kiểm tra phần bắt nhịp bằng âm thanh thật.
+const kick = path.join(dataDir, 'kick-120.wav');
+execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', "aevalsrc='0.9*sin(2*PI*55*t)*exp(-18*mod(t\,0.5))':s=48000:d=20", kick]);
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required',
+  '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${kick}`] });
 
 const problems = [];
 const note = (ok, text) => { console.log(`${ok ? 'ĐẠT ' : 'LỖI '} ${text}`); if (!ok) problems.push(text); };
@@ -43,7 +47,7 @@ async function checkLayout(page, name) {
   note(r.small.length === 0, `${name}: vùng bấm đủ lớn${r.small.length ? ` → ${r.small.join(' | ')}` : ''}`);
 }
 
-const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
+const VIEWS = ['Bắt đầu', 'Bảng hiệu ứng', 'Kịch bản', 'Quà tặng', 'Nhạc và nhịp', 'Điện thoại', 'Hiển thị', 'Nhật ký'];
 
 try {
   // ----- Máy tính ---------------------------------------------------------
@@ -164,6 +168,27 @@ try {
   await desk.click('.gift-row >> text=Hiệu ứng riêng');
   await desk.waitForSelector('.rule-edit');
   note((await desk.locator('.rule:has(.rule-edit) .rule-text span').textContent()).includes('tặng Lion'), 'Quà tặng: "Hiệu ứng riêng" tạo kịch bản cho đúng quà và mở ra sửa');
+
+  // Nhạc và nhịp: nghe micro giả (trống 120 nhịp/phút), overlay phải phản ứng.
+  await desk.click('#clear-all');
+  await desk.click('#nav >> text=Nhạc và nhịp');
+  await desk.evaluate(async () => { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); });
+  await desk.click('#nav >> text=Nhạc và nhịp');
+  await desk.click('.card-head .switch');
+  await desk.waitForSelector('text=Dừng nghe', { timeout: 8000 }).catch(() => {});
+  const devOpt = await desk.locator('.view select >> nth=0').locator('option').nth(1).getAttribute('value').catch(() => null);
+  if (devOpt) await desk.locator('.view select >> nth=0').selectOption(devOpt);
+  await sleep(6000);
+  const bpmText = await desk.locator('.meter .small').textContent();
+  const bpm = parseInt(bpmText, 10);
+  note(bpm >= 114 && bpm <= 126, `Nhạc và nhịp: bắt đúng nhịp của tệp trống 120 nhịp/phút (đo được "${bpmText}")`);
+  const rx = await frame().evaluate(() => { const r = window.__overlay.react; return { bolts: r.beats, embers: r.embers.length, bass: r.running }; });
+  note(rx.bolts > 5 && rx.embers > 3 && rx.bass, `Nhạc và nhịp: overlay phản ứng (${rx.bolts} nhịp, ${rx.embers} tàn lửa)`);
+  await desk.screenshot({ path: path.join(shots, '17-nhac-va-nhip.png') });
+  await checkLayout(desk, 'Nhạc và nhịp');
+  await desk.click('.card-head .switch');
+  await sleep(900);
+  note(await frame().evaluate(() => !window.__overlay.react.running && window.__overlay.react.embers.length === 0), 'Nhạc và nhịp: tắt công tắc thì lớp hiệu ứng nhạc tắt hẳn');
 
   // Điện thoại: bật, lấy địa chỉ từ mã QR.
   await desk.click('#nav >> text=Điện thoại');

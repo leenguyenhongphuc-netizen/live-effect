@@ -51,6 +51,18 @@ test('sự kiện TikTok đi tới overlay và trang lạ bị chặn', async ()
     await t.json('POST', '/api/simulate', { giftId: '6369' });
     assert.equal((await ov.wait((m) => m.type === 'fx' && m.effect === 'fireworks')).image, 'https://cdn/lion.png');
 
+    // Khung nhạc từ bảng điều khiển chỉ tới overlay khi bật "Nhạc và nhịp", và được làm sạch.
+    const panel = new WebSocket(`ws://127.0.0.1:${t.app.port}/ws?role=panel`);
+    await new Promise((r) => panel.on('open', r));
+    panel.send(JSON.stringify({ type: 'audio', b: 0.5, beat: true }));
+    const cfg0 = (await t.json('GET', '/api/state')).body.config;
+    await t.json('PUT', '/api/config', { ...cfg0, music: { ...cfg0.music, enabled: true } });
+    assert.equal((await ov.wait((m) => m.type === 'widgets' && m.music?.enabled)).music.palette, 'storm');
+    panel.send(JSON.stringify({ type: 'audio', b: 7, l: 'x', beat: 'yes', s: 0.4, bands: [50, 999, -3] }));
+    assert.deepEqual(await ov.wait((m) => m.type === 'audio'), { type: 'audio', b: 1, m: 0, h: 0, l: 0, beat: false, s: 0.4, bands: [50, 100, 0] });
+    assert.equal(ov.msgs.filter((m) => m.type === 'audio').length, 1);
+    panel.close();
+
     const sim = await t.json('POST', '/api/simulate', { type: 'follow' });
     assert.equal(sim.body.overlays, 1);
     await ov.wait((m) => m.type === 'fx' && m.effect === 'hearts');
