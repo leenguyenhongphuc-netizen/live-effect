@@ -45,9 +45,10 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, permissions: ['camera'] });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => note(false, `lỗi JS: ${e.message}`));
-  page.on('console', (m) => { if (m.type() === 'error') note(false, `console: ${m.text()}`); });
+  // Thư viện tách người in dòng thông tin "INFO: …" qua kênh lỗi; đó không phải lỗi.
+  page.on('console', (m) => { if (m.type() === 'error' && !m.text().startsWith('INFO:')) note(false, `console: ${m.text()}`); });
   page.on('requestfailed', (r) => note(false, `không tải được: ${r.url()}`));
-  await page.goto(`http://127.0.0.1:${srv.address().port}/`);
+  await page.goto(`http://127.0.0.1:${srv.address().port}/${process.env.QUERY || ''}`);
   const small = await page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.getBoundingClientRect().height < 44).length);
   note(small === 0 && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Màn hình cài đặt: nút đủ lớn, không tràn ngang');
   await page.screenshot({ path: path.join(shots, 'm1-cai-dat.png') });
