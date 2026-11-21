@@ -271,6 +271,19 @@ try {
   await sleep(500);
   await desk.click('#clear-all');
 
+  // Lưu cấu hình: đổi một thiết lập rồi tải lại trang NGAY thì vẫn phải còn.
+  {
+    await desk.click('#nav >> text=Sân khấu');
+    const box = desk.locator('.field:has-text("Tự đổi sau mỗi") input');
+    await box.fill('7');
+    await desk.reload();
+    await desk.waitForSelector('.view');
+    await desk.click('#nav >> text=Sân khấu');
+    note(await desk.locator('.field:has-text("Tự đổi sau mỗi") input').inputValue() === '7', 'Lưu cấu hình: đổi rồi tải lại ngay vẫn còn nguyên');
+    await desk.locator('.field:has-text("Tự đổi sau mỗi") input').fill('0');
+    await sleep(600);
+  }
+
   // Sân khấu: tạo bài diễn, thêm một mốc pháo hoa ở giây 0, bấm Diễn thì mốc chạy.
   await desk.click('#clear-all');
   await desk.click('#nav >> text=Sân khấu');

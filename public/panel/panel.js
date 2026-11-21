@@ -79,12 +79,17 @@ function merge(old, next) {
   return plain(old) && plain(next) && Array.isArray(old) === Array.isArray(next) ? syncInto(old, next) : next;
 }
 
+let dirtySince = 0;
 function save() {
   clearTimeout(saveTimer);
+  if (!dirty) dirtySince = Date.now();
   dirty = true;
   const mine = ++saveSeq;
+  // Gõ liên tục thì gom lại, nhưng không bao giờ để thay đổi nằm chờ quá 1,2 giây.
+  const wait = Math.max(0, Math.min(350, 1200 - (Date.now() - dirtySince)));
   saveTimer = setTimeout(async () => {
     saving = true;
+    dirtySince = Date.now();
     try {
       const out = await api('PUT', '/api/config', S.config);
       if (out.remote) S.remote = out.remote;
@@ -97,8 +102,15 @@ function save() {
       saving = false;
       if (mine === saveSeq) dirty = false; // không còn thay đổi nào mới hơn đang chờ
     }
-  }, 350);
+  }, wait);
 }
+
+// Tải lại hay đóng cửa sổ khi còn thay đổi chưa lưu: gửi nốt ngay, không chờ hẹn giờ.
+window.addEventListener('pagehide', () => {
+  if (!dirty || !S.config) return;
+  clearTimeout(saveTimer);
+  fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(S.config), keepalive: true }).catch(() => {});
+});
 
 // Báo cho người dùng khi bấm thử mà chưa có phần mềm nào mở overlay.
 async function act(path, body) {
