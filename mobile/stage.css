@@ -23,3 +23,5 @@ button[aria-pressed="true"] { border-color: #ffd98a; color: #ffd98a; }
 #go { flex: none; min-height: 60px; border: 0; background: linear-gradient(180deg, #ffd98a, #e2a63a); color: #1b1203; font-size: 18px; }
 #go:disabled { opacity: 0.6; }
 #err { color: #ff8f8f !important; min-height: 1.5em; }
+#check { flex: none; }
+#diag { margin: 0; padding: 12px; border-radius: 12px; background: #15121c; border: 1px solid #2c2736; color: #e6e1f0; font: 13px/1.6 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }

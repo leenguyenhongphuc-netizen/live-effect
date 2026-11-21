@@ -52,6 +52,12 @@ try {
   const small = await page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.getBoundingClientRect().height < 44).length);
   note(small === 0 && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Màn hình cài đặt: nút đủ lớn, không tràn ngang');
   await page.screenshot({ path: path.join(shots, 'm1-cai-dat.png') });
+  // Tự kiểm tra máy: mọi bước phải đạt và in ra kết quả đọc được.
+  await page.tap('#check');
+  await page.waitForFunction(() => document.getElementById('diag').textContent.includes('Xong.'), null, { timeout: 90000 });
+  const diag = await page.locator('#diag').textContent();
+  note(!diag.includes('✗') && diag.includes('Tách người trên hình camera'), `Kiểm tra máy: mọi bước đạt${diag.includes('✗') ? ` → ${diag.split('\n').filter((l) => l.startsWith('✗')).join(' | ')}` : ''}`);
+  await page.screenshot({ path: path.join(shots, 'm1b-kiem-tra-may.png'), fullPage: true });
   await page.tap('#go');
   await page.waitForFunction(() => window.__stage.started, null, { timeout: 15000 });
   await page.waitForFunction(() => document.getElementById('cam').videoWidth > 0);
