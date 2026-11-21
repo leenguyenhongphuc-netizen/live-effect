@@ -3,6 +3,7 @@
 // màn hình này bằng chế độ live chia sẻ màn hình, nên sau khi bắt đầu không được có nút nào.
 import { keyedCanvas } from './vendor/key.js';
 
+const VERSION = '0.3';
 const $ = (id) => document.getElementById(id);
 const cam = $('cam');
 const person = $('person');
@@ -17,7 +18,7 @@ let behindCount = 0; // số hiệu ứng "sau lưng" đang chạy; chỉ tách 
 let wake = null;
 
 // Trạng thái để kiểm thử tự động và để xem khi cần gỡ lỗi (?debug=1).
-const state = window.__stage = { started: false, playing: 0, segmenter: 'chưa tải', delegate: '', segFrames: 0, cover: 0, segMs: 0, fallback: '', lastError: '' };
+const state = window.__stage = { started: false, playing: 0, segmenter: 'chưa tải', delegate: '', unlocked: null, muted: false, lastWhere: '', touches: 0, segFrames: 0, cover: 0, segMs: 0, fallback: '', lastError: '' };
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // ----- Camera ---------------------------------------------------------------
@@ -67,6 +68,7 @@ function giveUpBehind(why) {
   state.fallback = why;
   badFrames = 0;
   for (const node of [...layers.behind.children]) layers.front.append(node);
+  for (const entry of players.values()) if (entry.where === 'behind') entry.where = 'front';
   behindCount = 0;
   pctx.clearRect(0, 0, person.width, person.height);
 }
@@ -143,40 +145,65 @@ function showAlert(text) {
   showAlert.t = setTimeout(() => el.classList.remove('on'), 4200);
 }
 
+// Mỗi hiệu ứng có sẵn một trình phát, được "mở khoá" ngay trong cú bấm Bắt đầu. Trình duyệt
+// trên điện thoại (nhất là iPhone) chỉ cho phát có tiếng khi lệnh phát đến từ một cú bấm thật;
+// trình phát đã được mở khoá một lần thì về sau phát lại bằng cử chỉ nào cũng có tiếng.
+const players = new Map(); // id -> { video, node, where, timer }
+
+function unlockPlayers() {
+  for (const [id, fx] of Object.entries(EFFECTS)) {
+    if (players.has(id)) continue;
+    const video = document.createElement('video');
+    video.src = fx.src;
+    video.playsInline = true;
+    video.preload = 'auto';
+    const entry = { video, node: keyedCanvas(video, fx.key) || video, where: null, timer: 0 };
+    players.set(id, entry);
+    video.addEventListener('ended', () => stopPlayer(id));
+    video.addEventListener('error', () => { state.lastError = `clip: ${video.error?.message || 'không phát được'}`; stopPlayer(id); });
+    const p = video.play();
+    p?.then(() => { if (!entry.where) { video.pause(); video.currentTime = 0; } state.unlocked = true; })
+      .catch((err) => { state.unlocked = false; state.lastError = `mở khoá tiếng: ${err?.name || err}`; });
+  }
+}
+
+function stopPlayer(id) {
+  const entry = players.get(id);
+  if (!entry?.where) return;
+  clearTimeout(entry.timer);
+  entry.video.pause();
+  entry.node.remove();
+  if (entry.where === 'behind' && behindCount > 0) behindCount -= 1;
+  entry.where = null;
+  state.playing -= 1;
+}
+
 /** Phát một clip hiệu ứng (đã xoá nền) ở lớp phía trước hoặc sau lưng người. */
 async function play(id, where = 'front') {
   const fx = EFFECTS[id];
   if (!fx || !state.started) return;
-  const video = document.createElement('video');
-  video.src = fx.src;
-  video.playsInline = true;
-  video.preload = 'auto';
-  // Gọi phát ngay trong lúc còn hiệu lực của cú chạm (iPhone chặn tiếng nếu gọi muộn).
-  const started = video.play().catch(() => { video.muted = true; return video.play(); });
-  showAlert(fx.text);
+  if (!players.has(id)) unlockPlayers();
+  const entry = players.get(id);
+  stopPlayer(id); // đang phát dở thì phát lại từ đầu
+  const { video } = entry;
+  entry.where = 'front';
   state.playing += 1;
-  let behind = false;
-  let done = false;
-  const node = keyedCanvas(video, fx.key) || video;
-  const finish = () => {
-    if (done) return;
-    done = true;
-    node.stop?.();
-    node.remove();
-    video.removeAttribute('src');
-    video.load();
-    state.playing -= 1;
-    if (behind && behindCount > 0) behindCount -= 1;
-  };
-  video.addEventListener('ended', finish);
-  video.addEventListener('error', () => { state.lastError = `clip: ${video.error?.message || 'không phát được'}`; finish(); });
-  setTimeout(finish, 20000);
-  // Không tách được người thì vẫn phát ở phía trước, còn hơn không có gì.
-  if (where === 'behind' && !(await loadSegmenter())) { where = 'front'; state.fallback = 'không tải được bộ tách người'; }
-  if (done) return;
-  if (where === 'behind') { behind = true; behindCount += 1; state.fallback = ''; }
-  layers[where].append(node);
-  started.catch(finish);
+  layers.front.append(entry.node);
+  try { video.currentTime = 0; } catch { /* chưa tải xong */ }
+  video.muted = false;
+  video.play().catch(() => { video.muted = true; state.muted = true; return video.play(); })
+    .catch((err) => { state.lastError = `phát clip: ${err?.name || err}`; stopPlayer(id); });
+  entry.timer = setTimeout(() => stopPlayer(id), 20000);
+  showAlert(fx.text);
+  state.lastWhere = where;
+  if (where !== 'behind') return;
+  // Không tách được người thì clip cứ ở phía trước, còn hơn không có gì.
+  if (!(await loadSegmenter())) { state.fallback = 'không tải được bộ tách người'; return; }
+  if (entry.where !== 'front') return; // đã dừng trong lúc chờ
+  state.fallback = '';
+  entry.where = 'behind';
+  behindCount += 1;
+  layers.behind.append(entry.node);
 }
 window.__play = play;
 
@@ -186,6 +213,7 @@ $('stage').addEventListener('touchstart', (e) => {
   e.preventDefault();
   clearTimeout(holdTimer);
   const n = e.touches.length;
+  state.touches = n;
   if (n >= 3) { holdTimer = setTimeout(backToSetup, 1000); return; }
   // Chờ một nhịp ngắn để phân biệt 1 ngón với 2 ngón.
   clearTimeout(play.t);
@@ -218,6 +246,7 @@ $('go').addEventListener('click', async () => {
   const go = $('go');
   go.disabled = true;
   $('err').textContent = '';
+  unlockPlayers(); // phải gọi ngay trong cú bấm, trước khi chờ bất cứ thứ gì
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Trình duyệt này không mở được camera. Hãy dùng Chrome (Android) hoặc Safari (iPhone).');
     await openCamera();
@@ -246,7 +275,73 @@ if (params.get('debug')) {
   document.body.append(box);
   let last = 0;
   setInterval(() => {
-    box.textContent = `tách người: ${state.segmenter} (${state.delegate}) · ${state.segFrames - last} khung/giây · ${state.segMs} ms · người chiếm ${Math.round(state.cover * 100)}% · đang phát: ${state.playing}${state.fallback ? ` · đã chuyển ra trước: ${state.fallback}` : ''}${state.lastError ? ` · lỗi: ${state.lastError}` : ''}`;
+    box.hidden = !state.started; // không đè lên màn hình cài đặt
+    box.textContent = `chạm: ${state.touches} ngón → ${state.lastWhere || '-'} · tiếng: ${state.unlocked === null ? '?' : state.unlocked ? 'mở' : 'KHOÁ'}${state.muted ? ' (đang tắt tiếng)' : ''} · tách người: ${state.segmenter} (${state.delegate}) · ${state.segFrames - last} khung/giây · ${state.segMs} ms · người chiếm ${Math.round(state.cover * 100)}% · đang phát: ${state.playing}${state.fallback ? ` · đã chuyển ra trước: ${state.fallback}` : ''}${state.lastError ? ` · lỗi: ${state.lastError}` : ''}`;
     last = state.segFrames;
   }, 1000);
 }
+
+// ----- Kiểm tra máy: chạy từng bước và ghi kết quả ra màn hình để chụp gửi lại -----------
+async function diagnose() {
+  const out = $('diag');
+  const lines = [];
+  const say = (ok, text) => { lines.push(`${ok === null ? '•' : ok ? '✓' : '✗'} ${text}`); out.textContent = lines.join('\n'); };
+  const step = async (name, fn, ms = 20000) => {
+    try {
+      const r = await Promise.race([fn(), new Promise((_, no) => setTimeout(() => no(new Error(`quá ${ms / 1000} giây`)), ms))]);
+      say(true, `${name}${r ? `: ${r}` : ''}`);
+      return true;
+    } catch (err) { say(false, `${name}: ${err?.name && err.name !== 'Error' ? `${err.name} ` : ''}${err?.message || err}`); return false; }
+  };
+  out.hidden = false;
+  unlockPlayers();
+  const ua = navigator.userAgent;
+  const inApp = /FBAN|FBAV|Instagram|Zalo|Line\/|MicroMessenger|TikTok|musical_ly|BytedanceWebview/i.test(ua);
+  say(null, `Bản ${VERSION} · ${IOS ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : 'máy khác'} · ${(/(CriOS|Chrome|Version|Firefox|SamsungBrowser)\/[\d.]+/.exec(ua) || ['?'])[0]} · màn ${innerWidth}×${innerHeight}`);
+  say(!inApp, inApp ? 'Đang mở trong trình duyệt của ứng dụng khác (Zalo, Facebook, TikTok…): hãy mở bằng Chrome hoặc Safari' : 'Mở bằng trình duyệt thường');
+  say(window.isSecureContext, 'Kết nối an toàn (https)');
+  const camOk = await step('Camera', async () => { await openCamera(); return `${cam.videoWidth}×${cam.videoHeight}`; });
+  await step('Xoá nền clip (WebGL)', async () => {
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (!gl) throw new Error('máy không có WebGL');
+    return String(gl.getParameter(gl.VERSION)).slice(0, 28);
+  });
+  await step('Tải clip rồng', async () => {
+    const v = players.get('rong').video;
+    if (v.readyState < 2) await new Promise((ok, no) => { v.addEventListener('loadeddata', ok, { once: true }); v.addEventListener('error', () => no(new Error(v.error?.message || 'không giải mã được')), { once: true }); v.load(); });
+    return `${v.videoWidth}×${v.videoHeight}, ${v.duration.toFixed(1)} giây`;
+  });
+  await step('Phát có tiếng', async () => {
+    await new Promise((r) => setTimeout(r, 600));
+    if (state.unlocked === false) throw new Error(state.lastError || 'trình duyệt chặn');
+    return state.unlocked ? 'đã mở khoá' : 'chưa rõ';
+  });
+  const segOk = await step('Tải bộ tách người', async () => {
+    const t0 = performance.now();
+    if (!(await loadSegmenter())) throw new Error(state.lastError || 'không tải được');
+    return `${state.delegate}, ${Math.round(performance.now() - t0)} ms`;
+  }, 60000);
+  if (camOk && segOk) {
+    await step('Tách người trên hình camera', async () => {
+      const times = []; let cover = 0; let size = '';
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 120));
+        const t0 = performance.now();
+        const res = segmenter.segmentForVideo(cam, performance.now());
+        const masks = res.confidenceMasks || [];
+        const m = masks[masks.length - 1];
+        const a = m.getAsFloat32Array();
+        let n = 0; for (let k = 0; k < a.length; k++) if (a[k] > 0.5) n += 1;
+        cover = n / a.length;
+        size = `${m.width}×${m.height}, ${masks.length} lớp`;
+        for (const x of masks) x.close?.();
+        times.push(Math.round(performance.now() - t0));
+      }
+      const verdict = cover > 0.93 ? ' → SAI: coi cả khung là người' : cover < 0.02 ? ' → không thấy người (hãy đứng trước camera, đủ sáng)' : ' → ổn';
+      return `${size}, ${times.join('/')} ms, người chiếm ${Math.round(cover * 100)}%${verdict}`;
+    });
+  }
+  say(null, 'Xong. Chụp màn hình này gửi lại.');
+  stream?.getTracks().forEach((t) => t.stop());
+}
+$('check').addEventListener('click', async () => { $('check').disabled = true; try { await diagnose(); } finally { $('check').disabled = false; } });
