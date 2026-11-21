@@ -59,24 +59,35 @@ export function keyedCanvas(video, mode) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+  // Vẽ theo nhịp màn hình. Trình duyệt báo "có khung hình mới" thì vẽ ngay; nếu tín hiệu đó
+  // im lặng (có máy không báo đều cho video nằm ngoài trang) thì cứ khoảng 1/30 giây vẽ lại
+  // một lần khi video đang chạy, để hiệu ứng không bao giờ bị trống.
   let stopped = false;
-  const draw = () => {
+  let fresh = true;
+  let lastTime = -1;
+  let lastDraw = 0;
+  const onFrame = () => { fresh = true; if (!stopped) video.requestVideoFrameCallback(onFrame); };
+  if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
+  const draw = (now) => {
     if (stopped) return;
-    if (video.readyState >= 2 && video.videoWidth) {
-      if (canvas.width !== video.videoWidth) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        gl.viewport(0, 0, canvas.width, canvas.height);
-      }
-      try {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      } catch { /* khung hình chưa sẵn sàng */ }
+    requestAnimationFrame(draw);
+    if (video.readyState < 2 || !video.videoWidth) return;
+    const moved = video.currentTime !== lastTime && now - lastDraw > 30;
+    if (!fresh && !moved) return;
+    fresh = false;
+    lastTime = video.currentTime;
+    lastDraw = now;
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
     }
-    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(draw);
-    else requestAnimationFrame(draw);
+    try {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } catch { /* khung hình chưa sẵn sàng */ }
   };
-  draw();
+  requestAnimationFrame(draw);
   canvas.stop = () => { stopped = true; };
   return canvas;
 }
