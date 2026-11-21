@@ -110,8 +110,15 @@ npm start          # mở ứng dụng Electron
 npm run serve      # chỉ chạy lõi, mở http://127.0.0.1:3939/panel/ trong trình duyệt
 npm test           # kiểm thử bộ máy kịch bản, máy chủ, điều khiển từ điện thoại
 npm run audit      # duyệt toàn bộ giao diện bằng trình duyệt tự động (cần Playwright + ffmpeg)
+npm run demo       # quay hai video ngắn ứng dụng đang chạy với sự kiện giả lập (cần Playwright + ffmpeg)
 npm run dist       # đóng gói Windows (chạy trên Windows)
 ```
+
+### Tester độc lập
+
+`.claude/agents/app-tester.md` định nghĩa một tester AI kiểm thử hộp đen: tự dựng ứng dụng trên dữ liệu tạm, dùng như người dùng thật,
+thử giá trị biên, rồi viết báo cáo có ảnh vào `test-reports/<ngày>/report.md`. Tester không được sửa mã và không đọc kiểm thử của người viết mã.
+Trong Claude Code, gọi bằng: *“dùng agent app-tester kiểm thử bản hiện tại”*.
 
 | Thư mục | Nội dung |
 | --- | --- |

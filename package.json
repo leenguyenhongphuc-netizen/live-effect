@@ -8,6 +8,7 @@
     "serve": "node scripts/serve.js",
     "test": "node --test test/*.test.js",
     "audit": "node scripts/audit.js",
+    "demo": "node scripts/demo-video.js",
     "dist": "electron-builder --win --x64"
   },
   "repository": {
