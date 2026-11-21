@@ -1,0 +1,68 @@
+{
+  "name": "live-effect",
+  "version": "0.2.0",
+  "description": "Hiệu ứng livestream cho TikTok LIVE, OBS và stream game trên Windows",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node scripts/serve.js",
+    "test": "node --test test/*.test.js",
+    "audit": "node scripts/audit.js",
+    "demo": "node scripts/demo-video.js",
+    "build:mobile": "node scripts/build-mobile.js",
+    "test:mobile": "node scripts/test-mobile.js",
+    "dist": "electron-builder --win --x64"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leenguyenhongphuc-netizen/live-effect.git"
+  },
+  "keywords": [],
+  "author": "Live Effect",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/leenguyenhongphuc-netizen/live-effect/issues"
+  },
+  "homepage": "https://github.com/leenguyenhongphuc-netizen/live-effect#readme",
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "tiktok-live-connector": "^2.5.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "private": true,
+  "type": "module",
+  "build": {
+    "appId": "vn.liveeffect.app",
+    "productName": "Live Effect",
+    "files": [
+      "electron/**",
+      "src/**",
+      "public/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Live Effect"
+    },
+    "portable": {
+      "artifactName": "LiveEffect-portable-${version}.exe"
+    },
+    "publish": null
+  }
+}

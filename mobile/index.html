@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Live Effect Sân khấu</title>
+<link rel="stylesheet" href="stage.css">
+</head>
+<body>
+<main id="stage" aria-label="Màn hình live">
+  <video id="cam" playsinline muted autoplay></video>
+  <div id="behind" class="layer"></div>
+  <canvas id="person" class="layer"></canvas>
+  <div id="front" class="layer"></div>
+  <p id="alert" role="status"></p>
+</main>
+
+<section id="setup">
+  <h1>Live Effect <span>bản thử trên điện thoại</span></h1>
+  <p>Máy này làm camera chính. Trang hiện camera kèm hiệu ứng; TikTok phát lại màn hình này.</p>
+  <div class="row" role="group" aria-label="Chọn camera">
+    <button type="button" data-facing="user" aria-pressed="true">Camera trước</button>
+    <button type="button" data-facing="environment" aria-pressed="false">Camera sau</button>
+  </div>
+  <button type="button" id="go">Bắt đầu</button>
+  <p id="err" role="alert"></p>
+  <ol>
+    <li>Bấm <b>Bắt đầu</b>, cho phép dùng camera.</li>
+    <li><b>Chạm 1 ngón</b>: rồng bay phía trước. <b>Chạm 2 ngón</b>: rồng bay sau lưng bạn.</li>
+    <li>Mở TikTok → LIVE → <b>Mobile gaming</b> → Go LIVE, rồi quay lại trang này.</li>
+  </ol>
+  <p class="small">Sau khi bắt đầu, màn hình không còn nút nào để khán giả không thấy. Giữ 3 ngón 1 giây để quay về đây.</p>
+</section>
+<script type="module" src="stage.js"></script>
+</body>
+</html>

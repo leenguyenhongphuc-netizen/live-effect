@@ -1,0 +1,873 @@
+import http from 'node:http';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
+import QRCode from 'qrcode';
+import { Store } from './store.js';
+import { sendJson, readBody, readJson, saveBody, serveFile } from './http.js';
+import { createRemote } from './remote.js';
+import { GiftCatalog } from './gifts.js';
+import { ObsCamera } from './obscam.js';
+import { Jar } from './jar.js';
+import { EffectQueue } from './queue.js';
+import { FanBook } from './fans.js';
+import { Greeter, TIERS } from './greet.js';
+import { LiveExtras } from './extras.js';
+import { BoxGame } from './game.js';
+import { Webhook } from './webhook.js';
+import { Auction } from './auction.js';
+import { Stage } from './stage.js';
+import { Lights } from './lights.js';
+import { Engine } from './engine.js';
+import { TikTokSource } from './tiktok.js';
+import { TwitchSource } from './twitch.js';
+import { SepaySource, BANKS, vietQrPayload } from './donate.js';
+import { addToObs } from './obs.js';
+import { EFFECTS, SOUNDS, TRIGGERS, MEDIA_EXT, DEFAULT_PORT, safeMediaName, blankRule } from './defaults.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.join(HERE, '..', 'public');
+const MAX_MEDIA_BYTES = 300 * 1024 * 1024;
+const MAX_THUMB_BYTES = 400 * 1024;
+const BAD_TYPE = 'Loại tệp không hỗ trợ. Dùng ảnh (png, jpg, gif, webp), video (webm, mp4, mov) hoặc âm thanh (mp3, wav, ogg).';
+
+const SAMPLE = {
+  follow: { type: 'follow', user: 'ban_xem_moi', nickname: 'Bạn xem mới' },
+  gift: { type: 'gift', user: 'fan_cung', nickname: 'Fan cứng', giftName: 'Hoa hồng', count: 5, coins: 5 },
+  biggift: { type: 'gift', user: 'dai_gia', nickname: 'Đại gia', giftName: 'Sư tử', count: 1, coins: 29999 },
+  like: { type: 'like', user: 'nguoi_tha_tim', nickname: 'Người thả tim', likeCount: 100 },
+  share: { type: 'share', user: 'ban_than', nickname: 'Bạn thân' },
+  chat: { type: 'chat', user: 'khan_gia', nickname: 'Khán giả', text: 'Chào cả nhà nha!' },
+  join: { type: 'join', user: 'khach_moi', nickname: 'Khách mới' },
+  donate: { type: 'donate', user: '', nickname: 'Minh Anh', amount: 50000, text: 'Chị live vui quá, cố lên nha!' },
+};
+
+const HOOK_TYPES = ['donate', 'gift', 'follow', 'share', 'chat', 'like', 'join'];
+const cut = (v, max) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : '');
+const posNum = (v, max) => Math.min(max, Math.max(0, Math.round(Number(v) || 0)));
+
+/** Đổi tham số của link nhận sự kiện thành một sự kiện chuẩn. Trả về null nếu không hợp lệ. */
+export function hookEvent(p) {
+  if (!HOOK_TYPES.includes(p.type)) return null;
+  const name = cut(p.name, 60).trim();
+  const ev = { type: p.type, user: name, nickname: name, text: cut(p.text, 200), source: 'hook' };
+  if (p.type === 'donate') ev.amount = posNum(p.amount, 1e10);
+  if (p.type === 'gift') {
+    ev.count = posNum(p.count, 1e6) || 1;
+    ev.coins = posNum(p.coins, 1e9);
+    ev.giftName = cut(p.gift, 60) || 'quà';
+  }
+  if (p.type === 'like') ev.likeCount = posNum(p.count, 1e6) || 1;
+  return ev;
+}
+
+function sameKey(given, expected) {
+  if (typeof given !== 'string' || !expected) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Khởi động lõi ứng dụng: máy chủ HTTP + WebSocket chỉ nghe trên máy này.
+ * @returns {Promise<object>} điều khiển ứng dụng (url, fireRule, close...)
+ */
+export async function startApp({ dataDir, port = DEFAULT_PORT, hotkeys = false, onConfigChange, source, twitch: twitchInjected, sepay: sepayInjected, obs = addToObs, obsPort, hookFetch } = {}) {
+  const store = new Store(dataDir);
+  const tiktok = source || new TikTokSource();
+  const catalog = new GiftCatalog(path.join(dataDir, 'gifts.json'));
+  tiktok.catalog = catalog;
+  const jar = new Jar(() => store.config);
+  let lastSongRequest = 0;
+  const webhook = new Webhook({ getConfig: () => store.config, fetchImpl: hookFetch, onStatus: () => broadcast('panel', statusMsg()) });
+  const camera = new ObsCamera({ getConfig: () => store.config, port: obsPort, onStatus: () => broadcast('panel', statusMsg()) });
+  const twitch = twitchInjected || new TwitchSource();
+  const sepay = sepayInjected || new SepaySource();
+  const clients = new Set(); // { ws, role }
+  const log = []; // nhật ký sự kiện gần đây
+  let hotkeyErrors = [];
+  let boundPort = port;
+  let qrCache = { payload: null, svg: '' };
+  let sepayKey = '';
+
+  const broadcast = (role, msg) => {
+    const data = JSON.stringify(msg);
+    for (const c of clients) if (c.role === role && c.ws.readyState === 1) c.ws.send(data);
+  };
+  const overlayCount = () => [...clients].filter((c) => c.role === 'overlay' && !c.preview).length;
+  const statusMsg = () => ({
+    type: 'status', tiktok: tiktok.status, twitch: twitch.status, donate: sepay.status, overlays: overlayCount(), hotkeyErrors,
+    camera: camera.status,
+    webhook: webhook.status,
+    lights: lights.status,
+  });
+  const widgetsMsg = () => {
+    const w = store.config.widgets;
+    const dn = store.config.donate;
+    return {
+      type: 'widgets',
+      music: store.config.music,
+      captions: store.config.captions,
+      jar: store.config.jar,
+      extras: store.config.extras,
+      game: store.config.game,
+      scenery: store.config.scenery,
+      auction: store.config.auction,
+      zones: store.config.stage.zones,
+      bgm: store.config.bgm,
+      widgets: { ...w, qr: { ...w.qr, svg: qrCache.svg, bank: BANKS.find((b) => b.bin === dn.bank)?.name || '', holder: dn.holder } },
+    };
+  };
+
+  /** Vẽ lại mã VietQR khi thông tin tài khoản đổi. Mã được tạo ngay trên máy này. */
+  async function refreshQr() {
+    const dn = store.config.donate;
+    const payload = vietQrPayload({ bin: dn.bank, account: dn.account, memo: dn.memo });
+    if (payload === qrCache.payload) return;
+    qrCache = { payload, svg: payload ? await QRCode.toString(payload, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) : '' };
+  }
+
+  function syncSepay() {
+    const dn = store.config.donate;
+    const key = dn.enabled && dn.sepayToken ? `${dn.sepayToken}|${dn.account}` : '';
+    if (key === sepayKey) return;
+    sepayKey = key;
+    if (key) sepay.start({ token: dn.sepayToken, account: dn.account });
+    else sepay.stop();
+  }
+
+  // Khung phân tích nhạc từ bảng điều khiển: kiểm tra từng số rồi mới chuyển cho overlay.
+  const unit = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0; };
+  const relayAudio = (msg) => {
+    if (!store.config.music.enabled) return;
+    if (msg.beat === true) { camera.beat(unit(msg.s)); lights.onBeat(); }
+    stage.onAudio({ level: unit(msg.l), beat: msg.beat === true });
+    broadcast('overlay', {
+      type: 'audio', b: unit(msg.b), m: unit(msg.m), h: unit(msg.h), l: unit(msg.l), beat: msg.beat === true, s: unit(msg.s),
+      bands: Array.isArray(msg.bands) ? msg.bands.slice(0, 12).map((x) => Math.round(unit(Number(x) / 100) * 100)) : [],
+    });
+  };
+
+  // Kịch bản có kèm chuyển động camera: gửi lệnh sang OBS cùng lúc với hiệu ứng trên overlay.
+  const queue = new EffectQueue({
+    dispatch: (msg) => {
+      if (msg.camera && msg.camera !== 'none') camera.move(msg.camera, { duration: msg.duration });
+      if (msg.scene) camera.scene(msg.scene, msg.sceneReturn ? msg.duration : 0);
+      if (msg.source) camera.source(msg.source, msg.sourceMode, msg.duration);
+      broadcast('overlay', msg);
+    },
+    onChange: () => {
+      broadcast('panel', { type: 'queue', queue: queue.state() });
+      // Bảng hàng đợi trên sóng: chỉ liệt kê các video đang chờ.
+      broadcast('overlay', { type: 'queueboard', rows: queue.state().waiting.filter((w) => w.media).slice(0, 8).map((w) => ({ label: w.label || 'Hiệu ứng', who: w.who })) });
+    },
+  });
+  const fans = new FanBook(path.join(dataDir, 'fans.json'));
+  const greeter = new Greeter({ getConfig: () => store.config, fans, fire: (msg) => queue.push(msg) });
+  const extras = new LiveExtras({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); if (msg.type === 'timer') broadcast('panel', msg); },
+    // Hết giờ: chạy các kịch bản có sự kiện "Hết giờ đếm ngược".
+    onTimeUp: () => { const ev = { type: 'timer', nickname: 'Đồng hồ' }; record(ev, engine.handle(ev)); },
+  });
+  const lights = new Lights({ getConfig: () => store.config, fetchImpl: hookFetch, onStatus: () => broadcast('panel', statusMsg()) });
+  const stage = new Stage({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); if (msg.type === 'stage') broadcast('panel', msg); },
+    onMood: (mood) => {
+      lights.onMood(mood);
+      // Lên cao trào: camera zoom vào một nhịp cho đã mắt.
+      if (mood.level === 'peak') camera.move('zoomin', { duration: 1.6 });
+    },
+    // Mốc của bài diễn phát ngay, không xếp hàng: phải rơi đúng giây đã đặt.
+    fireCue: (cue) => {
+      if (cue.camera !== 'none') camera.move(cue.camera, { duration: 2 });
+      if (cue.effect !== 'none' || cue.media) {
+        broadcast('overlay', { type: 'fx', effect: cue.effect, intensity: 3, duration: 5, sound: 'none', alert: '', mediaFit: 'cover', mediaKey: cue.mediaKey,
+          media: cue.zone ? '' : cue.media, zone: cue.zone, zoneMedia: cue.zone ? cue.media : '', zoneLoop: cue.hold });
+      }
+    },
+    switchCam: (i) => { camera.scene(store.config.stage[`cam${i}`], 0); },
+  });
+  const auction = new Auction({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); broadcast('panel', msg); },
+    onWin: (ev) => record(ev, engine.handle(ev)),
+  });
+  const game = new BoxGame({
+    getConfig: () => store.config,
+    emit: (msg) => { broadcast('overlay', msg); broadcast('panel', msg); },
+    // Có người mở trúng hộp bẫy: chạy các kịch bản có sự kiện của trò chơi.
+    onLose: (ev) => record(ev, engine.handle(ev)),
+  });
+  // Mọi hiệu ứng đi qua hàng đợi: video toàn màn hình phát lần lượt theo ưu tiên, còn lại chạy ngay.
+  const engine = new Engine(() => store.config, (msg) => {
+    if (msg.type === 'fx') queue.push(msg); else broadcast('overlay', msg);
+  });
+
+  let logSeq = 0;
+  const record = (ev, fired) => {
+    const entry = { ...ev, at: Date.now(), fired, id: ++logSeq };
+    webhook.send(entry);
+    log.push(entry);
+    if (log.length > 200) log.shift();
+    broadcast('panel', { type: 'event', event: entry });
+  };
+
+  const mergeGifts = (list) => {
+    if (catalog.merge(list)) broadcast('panel', { type: 'gifts', gifts: catalog.list() });
+  };
+  tiktok.on('gifts', mergeGifts);
+
+  // --- Dịch bình luận: gửi bình luận sang trang phụ đề (Chrome) để dịch, chờ tối đa 3 giây ---
+  const pendingChat = new Map();
+  const captionClients = () => [...clients].filter((c) => c.role === 'caption' && c.ws.readyState === 1);
+  const translating = () => store.config.captions.translateChat && captionClients().length > 0;
+  const askTranslation = (entry) => {
+    const tts = store.config.tts;
+    const speak = (translated) => {
+      if (tts.enabled && tts.chat) broadcast('panel', { type: 'tts', text: `${entry.nickname || entry.user || 'bạn'} nói ${String(translated || entry.text).slice(0, tts.maxLength)}` });
+    };
+    const timer = setTimeout(() => { pendingChat.delete(entry.id); speak(''); }, 3000);
+    timer.unref?.();
+    pendingChat.set(entry.id, { entry, timer, speak });
+    if (pendingChat.size > 200) pendingChat.delete(pendingChat.keys().next().value);
+    const data = JSON.stringify({ type: 'chat', id: entry.id, text: String(entry.text).slice(0, 300) });
+    for (const c of captionClients()) c.ws.send(data);
+  };
+
+  const ingest = (ev) => {
+    if (ev.type === 'gift' && ev.giftId && !ev.simulated) {
+      mergeGifts([{ id: ev.giftId, name: ev.giftName, coins: Math.round((ev.coins || 0) / (ev.count || 1)), image: ev.giftImage }]);
+    }
+    // Sổ fan và chào khách: ghi nhận người vào phòng, chào theo bậc; cộng xu cho người tặng quà.
+    if (ev.type === 'gift' && !ev.simulated) fans.addCoins(ev.user, ev.nickname, ev.coins);
+    extras.onEvent(ev);
+    if (ev.type === 'gift') auction.onGift(ev);
+    if (ev.type === 'chat') game.handleChat(ev);
+    // Khán giả chọn bài: gõ "!nhac 3" để phát bài số 3 trong danh sách nhạc nền.
+    if (ev.type === 'chat' && store.config.bgm.enabled && store.config.bgm.requests) {
+      const m = /^\s*!nh[aạ]c\s+(\d{1,2})\s*$/i.exec(String(ev.text || ''));
+      const index = m ? Number(m[1]) - 1 : -1;
+      if (store.config.bgm.tracks[index] && Date.now() - lastSongRequest > 20000) {
+        lastSongRequest = Date.now();
+        broadcast('overlay', { type: 'bgm', cmd: 'play', index });
+      }
+    }
+    const greeted = ev.type === 'join' ? greeter.handleJoin(ev) : null;
+    if (greeted) record({ ...ev, greeted }, []);
+    const fired = engine.handle(ev);
+    // Hũ quà: quà nào cũng rơi vào hũ (kể cả khi đang tắt chúc mừng); đầy thì vỡ và chạy kịch bản "Hũ quà đầy".
+    if (ev.type === 'gift') {
+      const put = jar.add({ coins: ev.coins, count: ev.count, image: ev.giftImage });
+      if (put) {
+        broadcast('overlay', { type: 'jardrop', drop: put.drop, coins: put.full ? store.config.jar.target : jar.coins });
+        if (put.full) {
+          broadcast('overlay', { type: 'jarburst', rounds: jar.rounds });
+          const full = { type: 'jar', user: ev.user, nickname: ev.nickname, avatar: ev.avatar, coins: store.config.jar.target, simulated: ev.simulated };
+          record(full, engine.handle(full));
+        }
+      }
+    }
+    // Người vào xem xuất hiện dồn dập; chỉ ghi nhật ký khi có kịch bản chạy.
+    if (ev.type !== 'join' || (fired.length && !greeted)) record(ev, fired);
+    if (ev.type === 'chat' && ev.text && translating()) askTranslation(log.at(-1));
+    const tts = store.config.tts;
+    if (tts.enabled) {
+      const who = ev.nickname || ev.user || 'bạn';
+      let say = '';
+      // Đang bật dịch bình luận và có trang phụ đề mở: chờ bản dịch rồi mới đọc (xem askTranslation).
+      if (ev.type === 'chat' && tts.chat && ev.text && !translating()) say = `${who} nói ${String(ev.text).slice(0, tts.maxLength)}`;
+      else if (ev.type === 'gift' && tts.gift) say = `Cảm ơn ${who} đã tặng ${ev.count || 1} ${ev.giftName || 'quà'}`;
+      else if (ev.type === 'follow' && tts.follow && fired.length) say = `Cảm ơn ${who} đã follow`;
+      else if (ev.type === 'donate' && tts.donate) say = `Cảm ơn ${who} đã ủng hộ ${ev.amount || 0} đồng. ${String(ev.text || '').slice(0, tts.maxLength)}`;
+      if (say) broadcast('panel', { type: 'tts', text: say });
+    }
+  };
+
+  tiktok.on('event', ingest);
+  tiktok.on('status', (s) => {
+    if (s.state === 'connected' && tiktok.lastState !== 'connected') { engine.resetSession(); greeter.resetSession(); extras.resetSession(); jar.reset(); broadcast('overlay', jar.state()); }
+    tiktok.lastState = s.state;
+    broadcast('panel', statusMsg());
+  });
+  twitch.on('event', ingest);
+  twitch.on('status', () => broadcast('panel', statusMsg()));
+  sepay.on('event', ingest);
+  sepay.on('status', () => broadcast('panel', statusMsg()));
+
+  const pushConfig = () => {
+    broadcast('overlay', widgetsMsg());
+    broadcast('overlay', engine.goalState());
+    broadcast('overlay', engine.topState());
+    broadcast('overlay', { ...jar.state(), drops: undefined });
+    for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) broadcast('overlay', m);
+    broadcast('overlay', game.state());
+    broadcast('panel', { type: 'config', config: store.config });
+    onConfigChange?.(store.config);
+  };
+
+  /** Nhận một tệp vào thư viện. Trả về [mã HTTP, nội dung trả lời]. */
+  async function receiveMedia(req, url) {
+    const safe = safeMediaName(url.searchParams.get('name'));
+    if (!safe) return [400, { error: BAD_TYPE }];
+    try {
+      await saveBody(req, path.join(store.mediaDir, safe.name), MAX_MEDIA_BYTES);
+    } catch (err) {
+      if (err.status === 413) return [413, { error: 'Tệp quá lớn (tối đa 300 MB).' }];
+      if (err.status === 400) return [400, { error: 'Tệp rỗng hoặc bị ngắt giữa chừng. Hãy thử lại.' }];
+      throw err;
+    }
+    broadcast('panel', { type: 'media', media: store.listMedia() });
+    return [200, { name: safe.name, kind: safe.kind, media: store.listMedia() }];
+  }
+
+  async function receiveThumb(req, url) {
+    const safe = safeMediaName(url.searchParams.get('name'));
+    if (!safe || safe.kind === 'audio' || !store.listMedia().includes(safe.name)) return [400, { error: 'Không có tệp này trong thư viện' }];
+    let buf;
+    try { buf = await readBody(req, MAX_THUMB_BYTES); } catch { return [413, { error: 'Ảnh thu nhỏ quá lớn' }]; }
+    return store.saveThumb(safe.name, buf) ? [200, { ok: true }] : [400, { error: 'Ảnh thu nhỏ phải là JPEG' }];
+  }
+
+  /** Tạo một "Nút bấm tay" phát video/hình toàn màn hình; nút hiện ngay trên điện thoại. */
+  function addMediaButton(file, title) {
+    const rule = blankRule(`r-${Date.now().toString(36)}`);
+    rule.name = (cut(title, 60).trim() || file.replace(/\.[^.]+$/, '')).slice(0, 60);
+    rule.trigger.type = 'button';
+    rule.action = { ...rule.action, effect: 'none', sound: 'none', alert: false, text: '', media: file, mediaFit: 'cover' };
+    store.set({ ...store.config, rules: [...store.config.rules, rule] });
+    pushConfig();
+    return rule.id;
+  }
+
+  const serveThumb = (res, name) => {
+    const safe = safeMediaName(name);
+    if (!safe) return sendJson(res, 404, { error: 'not found' });
+    return serveFile(res, store.thumbDir, `${safe.name}.jpg`);
+  };
+
+  const remote = createRemote({
+    publicDir: PUBLIC_DIR,
+    getConfig: () => store.config,
+    basePort: () => boundPort + 1,
+    getState: () => ({
+      status: { state: tiktok.status.state, username: tiktok.status.username, viewers: tiktok.status.viewers },
+      overlays: overlayCount(),
+      celebrate: store.config.gifts.celebrate,
+      paused: queue.paused,
+      stage: { ...stage.state(), shows: store.config.stage.shows.length },
+      camera: camera.status.state === 'ready',
+      buttons: store.config.rules
+        .filter((r) => r.enabled && r.trigger.type === 'button')
+        .map((r) => ({ id: r.id, name: r.name, effect: r.action.effect, media: r.action.media, thumb: store.hasThumb(r.action.media) })),
+      effects: EFFECTS,
+    }),
+    // Điện thoại chỉ được: bấm một nút, chạy một hiệu ứng có sẵn, dừng tất cả, và thêm video/hình thành nút mới.
+    fire: (body) => {
+      // Chuyển động camera bấm thẳng từ điện thoại (chỉ khi đã nối OBS).
+      if (typeof body.camera === 'string') return camera.move(body.camera, { duration: 2.5 });
+      // Nút diễn tay trên điện thoại: bài kế, đẩy cao trào, về chế độ trò chuyện.
+      if (body.stage === 'next') { stage.next(); return true; }
+      if (body.stage === 'boost') { stage.boost(); return true; }
+      if (body.stage === 'talk') { stage.stop(); return true; }
+      if (typeof body.paused === 'boolean') { queue.setPaused(body.paused); return true; }
+      if (typeof body.celebrate === 'boolean') {
+        store.set({ ...store.config, gifts: { ...store.config.gifts, celebrate: body.celebrate } });
+        broadcast('panel', { type: 'config', config: store.config });
+        return true;
+      }
+      if (body.clear === true) {
+        queue.clear();
+        broadcast('overlay', { type: 'clear' });
+        return true;
+      }
+      if (typeof body.ruleId === 'string') {
+        const rule = store.config.rules.find((r) => r.id === body.ruleId && r.enabled && r.trigger.type === 'button');
+        return rule ? engine.fireRule(rule.id, {}) : false;
+      }
+      if (EFFECTS.some((e) => e.id === body.effect)) {
+        engine.fire({ effect: body.effect, intensity: 2, duration: 5, sound: 'none' });
+        return true;
+      }
+      return false;
+    },
+    extra: async (req, res, url) => {
+      const route = `${req.method} ${url.pathname}`;
+      if (route === 'POST /r/upload') {
+        const [status, body] = await receiveMedia(req, url);
+        if (status === 200 && body.kind !== 'audio') body.ruleId = addMediaButton(body.name, url.searchParams.get('title'));
+        delete body.media; // điện thoại không cần danh sách thư viện
+        sendJson(res, status, body);
+        return true;
+      }
+      if (route === 'POST /r/thumb') {
+        const [status, body] = await receiveThumb(req, url);
+        sendJson(res, status, body);
+        return true;
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/r/thumb/')) {
+        serveThumb(res, decodeURIComponent(url.pathname.slice('/r/thumb/'.length)));
+        return true;
+      }
+      return false;
+    },
+    onChange: () => remote.info().then((info) => broadcast('panel', { type: 'remote', remote: info })).catch(() => {}),
+  });
+
+  const hookUrl = () => (store.config.hook.enabled && store.config.hook.key ? `http://127.0.0.1:${boundPort}/hook/${store.config.hook.key}` : '');
+
+  const state = async () => ({
+    remote: await remote.info(),
+    config: store.config,
+    status: statusMsg(),
+    media: store.listMedia(),
+    gifts: catalog.list(),
+    queue: queue.state(),
+    timer: extras.timerState(),
+    game: game.state(),
+    auctionState: auction.state(),
+    stageState: stage.state(),
+    fans: { size: fans.size, top: fans.top(10) },
+    catalog: { effects: EFFECTS, sounds: SOUNDS, triggers: TRIGGERS, mediaExt: MEDIA_EXT, banks: BANKS, greetTiers: TIERS },
+    overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
+    hookUrl: hookUrl(),
+    capabilities: { hotkeys },
+    log: log.slice(-100),
+  });
+
+  const allowedHosts = () => new Set([`127.0.0.1:${boundPort}`, `localhost:${boundPort}`]);
+  // Chặn trang web lạ trong trình duyệt gọi vào máy chủ cục bộ (CSRF, DNS rebinding).
+  const trusted = (req) => {
+    const hosts = allowedHosts();
+    if (!hosts.has(req.headers.host)) return false;
+    const origin = req.headers.origin;
+    if (!origin) return true;
+    try { return hosts.has(new URL(origin).host); } catch { return false; }
+  };
+
+  async function api(req, res, url) {
+    const route = `${req.method} ${url.pathname}`;
+
+    if (route === 'GET /api/state') return sendJson(res, 200, await state());
+
+    if (route === 'PUT /api/config') {
+      const body = await readJson(req);
+      store.set(body);
+      await refreshQr();
+      syncSepay();
+      pushConfig();
+      await camera.sync();
+      await remote.sync();
+      return sendJson(res, 200, { config: store.config, remote: await remote.info(), hookUrl: hookUrl() });
+    }
+
+    if (route === 'POST /api/remote/rotate') {
+      // Đổi mã ghép nối: mọi điện thoại đã quét mã cũ sẽ mất quyền điều khiển.
+      store.set(store.config, { rotateToken: true });
+      remote.sync();
+      return sendJson(res, 200, { remote: await remote.info() });
+    }
+
+    if (route === 'POST /api/connect') {
+      const body = await readJson(req);
+      const username = String(body.username || store.config.tiktok.username || '').trim().replace(/^@/, '');
+      if (username !== store.config.tiktok.username) {
+        store.set({ ...store.config, tiktok: { ...store.config.tiktok, username } });
+        broadcast('panel', { type: 'config', config: store.config });
+      }
+      // Không chờ kết nối xong: trạng thái được đẩy về qua WebSocket.
+      tiktok.connect(username, { signApiKey: store.config.tiktok.signApiKey }).catch(() => {});
+      return sendJson(res, 202, { ok: true });
+    }
+
+    if (route === 'POST /api/disconnect') {
+      await tiktok.disconnect();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/twitch/connect') {
+      const body = await readJson(req);
+      const channel = cut(body.channel, 80) || store.config.twitch.channel;
+      twitch.connect(channel);
+      const joined = twitch.status.channel;
+      if (joined && joined !== store.config.twitch.channel) {
+        store.set({ ...store.config, twitch: { channel: joined } });
+        broadcast('panel', { type: 'config', config: store.config });
+      }
+      return sendJson(res, 202, { ok: true });
+    }
+
+    if (route === 'POST /api/twitch/disconnect') {
+      twitch.disconnect();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/caption/chat') {
+      // Trang phụ đề trả về bản dịch của một bình luận (hoặc báo không cần dịch).
+      const body = await readJson(req);
+      const wait = pendingChat.get(Number(body.id));
+      if (!wait) return sendJson(res, 200, { ok: false });
+      pendingChat.delete(Number(body.id));
+      clearTimeout(wait.timer);
+      const text = typeof body.text === 'string' ? body.text.trim().slice(0, 300) : '';
+      if (text) {
+        wait.entry.translated = text;
+        broadcast('panel', { type: 'chatTranslated', id: wait.entry.id, text });
+      }
+      wait.speak(text);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/caption') {
+      // Câu nói và bản dịch từ trang phụ đề (mở trong Chrome): làm sạch rồi đưa lên overlay.
+      const body = await readJson(req);
+      const text = typeof body.text === 'string' ? body.text.trim().slice(0, 300) : '';
+      const on = store.config.captions.enabled;
+      if (on && text) {
+        const lines = (Array.isArray(body.lines) ? body.lines : []).slice(0, 2)
+          .map((l) => ({ lang: String(l?.lang || '').replace(/[^a-z-]/gi, '').slice(0, 8), text: typeof l?.text === 'string' ? l.text.trim().slice(0, 300) : '' }))
+          .filter((l) => l.text);
+        broadcast('overlay', { type: 'caption', text, lines, final: body.final === true });
+      }
+      return sendJson(res, 200, { ok: true, enabled: on, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/obs/add') {
+      return sendJson(res, 200, await obs(`http://127.0.0.1:${boundPort}/overlay`));
+    }
+
+    if (route === 'POST /api/test') {
+      const body = await readJson(req);
+      if (body.ruleId) {
+        const rule = store.config.rules.find((r) => r.id === body.ruleId);
+        if (!rule) return sendJson(res, 404, { error: 'Không tìm thấy kịch bản' });
+        const sample = SAMPLE[rule.trigger.type] || SAMPLE.follow;
+        engine.fire(rule.action, { ...sample, giftName: rule.trigger.giftName || sample.giftName });
+      } else {
+        const a = body.action || {};
+        engine.fire({
+          effect: EFFECTS.some((e) => e.id === a.effect) ? a.effect : 'none',
+          intensity: Math.min(3, Math.max(1, Number(a.intensity) || 2)),
+          duration: Math.min(30, Math.max(1, Number(a.duration) || 5)),
+          sound: typeof a.sound === 'string' ? a.sound.slice(0, 140) : 'none',
+          media: typeof a.media === 'string' ? a.media.slice(0, 140) : '',
+          alert: Boolean(a.text),
+          text: typeof a.text === 'string' ? a.text.slice(0, 140) : '',
+        }, SAMPLE.gift);
+      }
+      return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/simulate') {
+      const body = await readJson(req);
+      // Thử đúng một món quà trong danh mục (kèm hình thật của quà đó).
+      const gift = body.giftId ? catalog.get(String(body.giftId)) : null;
+      if (gift) {
+        ingest({ ...SAMPLE.gift, giftId: gift.id, giftName: gift.name, giftImage: gift.image, count: 1, coins: gift.coins, simulated: true });
+        return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+      }
+      const sample = SAMPLE[body.type];
+      if (!sample) return sendJson(res, 400, { error: 'Loại sự kiện không hợp lệ' });
+      // Mỗi lần giả lập follow dùng tên khác nhau để không bị coi là follow lặp.
+      const ev = sample.type === 'follow' ? { ...sample, user: `${sample.user}_${Date.now() % 100000}` } : { ...sample };
+      ingest({ ...ev, simulated: true });
+      return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/camera/test') {
+      const body = await readJson(req);
+      const ok = camera.move(String(body.move || ''), { duration: 2.5 });
+      return sendJson(res, 200, { ok, camera: camera.status });
+    }
+
+    if (route === 'POST /api/greet/test') {
+      const body = await readJson(req);
+      const tier = TIERS.find((t) => t.id === body.tier);
+      if (!tier) return sendJson(res, 400, { error: 'Bậc không hợp lệ' });
+      greeter.greet(tier, { user: 'khach_quy', nickname: 'Khách quý' });
+      return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/stage') {
+      const body = await readJson(req);
+      if (body.action === 'zones') { broadcast('overlay', { type: 'zonepreview', cam: Number(body.cam) === 2 ? 2 : 1 }); return sendJson(res, 200, { ok: true }); }
+      if (body.action === 'start') { if (!stage.start(String(body.id || ''))) return sendJson(res, 404, { error: 'Không tìm thấy bài diễn' }); }
+      else if (body.action === 'stop') stage.stop();
+      else if (body.action === 'next') stage.next();
+      else if (body.action === 'boost') stage.boost();
+      else if (body.action === 'light') lights.set(String(body.color || ''), 200, true);
+      else if (body.action === 'cam') stage.setCam(Number(body.cam));
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { stage: stage.state() });
+    }
+
+    if (route === 'POST /api/auction') {
+      const body = await readJson(req);
+      if (body.action === 'start') auction.start({ item: body.item, seconds: body.seconds });
+      else if (body.action === 'finish') auction.finish();
+      else if (body.action === 'cancel') auction.cancel();
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { auction: auction.state() });
+    }
+
+    if (route === 'POST /api/bgm') {
+      const body = await readJson(req);
+      if (!['next', 'pause', 'play'].includes(body.cmd)) return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      const index = Number.isInteger(body.index) && store.config.bgm.tracks[body.index] ? body.index : undefined;
+      broadcast('overlay', { type: 'bgm', cmd: body.cmd, index });
+      return sendJson(res, 200, { ok: true, overlays: overlayCount() });
+    }
+
+    if (route === 'POST /api/game') {
+      const body = await readJson(req);
+      if (body.action === 'reset') game.reset();
+      else if (body.action === 'pick') game.pick(body.n, { nickname: 'Chủ phòng', host: true });
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { game: game.state() });
+    }
+
+    if (route === 'POST /api/timer') {
+      const body = await readJson(req);
+      if (body.action === 'start') extras.start();
+      else if (body.action === 'pause') extras.pause();
+      else if (body.action === 'reset') extras.reset();
+      else if (body.action === 'add') extras.add(Math.min(36000, Math.max(-36000, Number(body.seconds) || 0)));
+      else return sendJson(res, 400, { error: 'Lệnh không hợp lệ' });
+      return sendJson(res, 200, { timer: extras.timerState() });
+    }
+
+    if (route === 'POST /api/queue') {
+      const body = await readJson(req);
+      if (typeof body.paused === 'boolean') queue.setPaused(body.paused);
+      if (body.clear === true) queue.clear();
+      return sendJson(res, 200, { queue: queue.state() });
+    }
+
+    if (route === 'POST /api/clear') {
+      queue.clear();
+      broadcast('overlay', { type: 'clear' });
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/jar/reset') {
+      jar.reset();
+      broadcast('overlay', jar.state());
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/goal/reset') {
+      engine.resetSession();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/rules/new') {
+      return sendJson(res, 200, { rule: blankRule(`r-${Date.now().toString(36)}`) });
+    }
+
+    if (route === 'POST /api/media') {
+      const [status, body] = await receiveMedia(req, url);
+      return sendJson(res, status, body);
+    }
+
+    if (route === 'POST /api/thumb') {
+      const [status, body] = await receiveThumb(req, url);
+      return sendJson(res, status, body);
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/media/')) {
+      const safe = safeMediaName(decodeURIComponent(url.pathname.slice('/api/media/'.length)));
+      if (!safe) return sendJson(res, 400, { error: 'Tên tệp không hợp lệ' });
+      store.removeMedia(safe.name);
+      broadcast('panel', { type: 'media', media: store.listMedia() });
+      return sendJson(res, 200, { media: store.listMedia() });
+    }
+
+    return sendJson(res, 404, { error: 'not found' });
+  }
+
+  /**
+   * Link nhận sự kiện từ công cụ khác trên máy này (Streamer.bot, Stream Deck, script...):
+   *   /hook/<khoá>?type=donate&name=An&amount=50000&text=...
+   *   /hook/<khoá>?button=<tên hoặc id nút bấm tay>
+   * Khoá nằm ngay trong link nên dùng được cả GET lẫn POST.
+   */
+  async function hook(req, res, url, key) {
+    const cfg = store.config.hook;
+    if (!cfg.enabled || !sameKey(key, cfg.key)) return sendJson(res, 404, { error: 'not found' });
+    let params = Object.fromEntries(url.searchParams);
+    if (req.method === 'POST') {
+      const body = await readJson(req);
+      if (body && typeof body === 'object') params = { ...params, ...body };
+    }
+    if (params.button) {
+      const want = String(params.button).toLowerCase();
+      const rule = store.config.rules.find((r) => r.enabled && r.trigger.type === 'button' && (r.id === params.button || r.name.toLowerCase() === want));
+      if (!rule) return sendJson(res, 404, { error: 'Không có nút bấm tay nào tên như vậy' });
+      engine.fireRule(rule.id, {});
+      return sendJson(res, 200, { ok: true });
+    }
+    const ev = hookEvent(params);
+    if (!ev) return sendJson(res, 400, { error: `type phải là một trong: ${HOOK_TYPES.join(', ')}; hoặc dùng button=<tên nút>` });
+    ingest(ev);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  const server = http.createServer((req, res) => {
+    let url;
+    try {
+      url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+    } catch {
+      return sendJson(res, 400, { error: 'bad request' });
+    }
+    let p;
+    try { p = decodeURIComponent(url.pathname); } catch { return sendJson(res, 400, { error: 'bad request' }); }
+    const fail = (err) => {
+      if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message || 'Lỗi máy chủ' });
+    };
+
+    if (p.startsWith('/api/')) {
+      if (!trusted(req)) return sendJson(res, 403, { error: 'forbidden' });
+      return api(req, res, url).catch(fail);
+    }
+    if (p.startsWith('/hook/')) {
+      if (!allowedHosts().has(req.headers.host)) return sendJson(res, 403, { error: 'forbidden' });
+      if (req.method !== 'GET' && req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' });
+      return hook(req, res, url, p.slice('/hook/'.length)).catch(fail);
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
+
+    if (p === '/' || p === '/panel') {
+      res.writeHead(302, { Location: '/panel/' });
+      return res.end();
+    }
+    if (p === '/panel/') return serveFile(res, PUBLIC_DIR, 'panel/index.html');
+    if (p === '/caption' || p === '/caption/') return serveFile(res, PUBLIC_DIR, 'caption/index.html');
+    if (p === '/overlay' || p === '/overlay/') return serveFile(res, PUBLIC_DIR, 'overlay/index.html');
+    if (p.startsWith('/panel/') || p.startsWith('/overlay/') || p.startsWith('/remote/') || p.startsWith('/caption/')) return serveFile(res, PUBLIC_DIR, p.slice(1));
+    if (p.startsWith('/media/')) return serveFile(res, store.mediaDir, p.slice('/media/'.length));
+    if (p.startsWith('/thumb/')) return serveThumb(res, p.slice('/thumb/'.length));
+    return sendJson(res, 404, { error: 'not found' });
+  });
+
+  const wss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (url.pathname !== '/ws' || !trusted(req)) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const client = {
+        ws,
+        // 'caption' là trang phụ đề mở trong Chrome: nhận bình luận để dịch, không tính là overlay.
+        role: ['panel', 'caption'].includes(url.searchParams.get('role')) ? url.searchParams.get('role') : 'overlay',
+        preview: url.searchParams.get('preview') === '1',
+      };
+      clients.add(client);
+      ws.on('pong', () => { client.dead = false; });
+      if (client.role === 'overlay') {
+        // Overlay báo một video / hình trong hàng đợi đã phát xong, để phát cái kế tiếp.
+        ws.on('message', (data) => {
+          if (data.length > 200) return;
+          try {
+            const msg = JSON.parse(data);
+            if (msg && msg.type === 'done' && typeof msg.id === 'string') queue.done(msg.id);
+            if (msg && msg.type === 'showEnded') stage.trackEnded();
+          } catch { /* bỏ qua tin hỏng */ }
+        });
+      }
+      if (client.role === 'panel') {
+        ws.on('message', (data) => {
+          if (data.length > 600) return;
+          try {
+            const msg = JSON.parse(data);
+            if (msg && msg.type === 'audio') relayAudio(msg);
+          } catch { /* bỏ qua tin hỏng */ }
+        });
+      }
+      if (client.role === 'overlay') {
+        ws.send(JSON.stringify(widgetsMsg()));
+        ws.send(JSON.stringify(engine.goalState()));
+        ws.send(JSON.stringify(jar.state()));
+        ws.send(JSON.stringify(game.state()));
+        ws.send(JSON.stringify(auction.state()));
+        ws.send(JSON.stringify(stage.moodState()));
+        ws.send(JSON.stringify(stage.state()));
+        for (const m of [extras.timerState(), extras.likesState(), extras.bestState()]) ws.send(JSON.stringify(m));
+        ws.send(JSON.stringify(engine.topState()));
+      } else {
+        ws.send(JSON.stringify(statusMsg()));
+      }
+      broadcast('panel', statusMsg());
+      ws.on('close', () => {
+        clients.delete(client);
+        broadcast('panel', statusMsg());
+      });
+      ws.on('error', () => {});
+    });
+  });
+
+  // Giữ kết nối sống và dọn kết nối chết (OBS đôi khi đóng nguồn không báo).
+  const heartbeat = setInterval(() => {
+    for (const c of clients) {
+      if (c.dead) { c.ws.terminate(); continue; }
+      c.dead = true;
+      try { c.ws.ping(); } catch { /* đang đóng */ }
+    }
+  }, 20000);
+  // Cổng đang bận thì thử cổng kế tiếp; bảng điều khiển luôn hiện đúng link thật.
+  await new Promise((resolve, reject) => {
+    let tries = 0;
+    const tryListen = () => {
+      const onError = (err) => {
+        if (err.code === 'EADDRINUSE' && tries++ < 20) {
+          boundPort += 1;
+          tryListen();
+        } else reject(err);
+      };
+      server.once('error', onError);
+      server.listen(boundPort, '127.0.0.1', () => {
+        server.off('error', onError);
+        boundPort = server.address().port;
+        resolve();
+      });
+    };
+    tryListen();
+  });
+
+  await refreshQr();
+  syncSepay();
+  camera.sync().catch(() => {});
+  await remote.sync();
+
+  return {
+    remote,
+    port: boundPort,
+    url: `http://127.0.0.1:${boundPort}/panel/`,
+    overlayUrl: `http://127.0.0.1:${boundPort}/overlay`,
+    get config() { return store.config; },
+    ingest,
+    fireRule: (id) => engine.fireRule(id, {}),
+    setHotkeyErrors(list) {
+      hotkeyErrors = list;
+      broadcast('panel', statusMsg());
+    },
+    async close() {
+      clearInterval(heartbeat);
+      sepay.stop();
+      twitch.disconnect();
+      await remote.close();
+      await camera.close();
+      fans.save();
+      extras.close();
+      game.close();
+      auction.close();
+      stage.close();
+      await tiktok.disconnect().catch(() => {});
+      for (const c of clients) c.ws.terminate();
+      await new Promise((r) => server.close(r));
+    },
+  };
+}

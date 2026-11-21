@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Effect — Overlay</title>
+<link rel="stylesheet" href="/overlay/overlay.css">
+</head>
+<body>
+<canvas id="react" aria-hidden="true"></canvas>
+<canvas id="jar" aria-hidden="true"></canvas>
+<canvas id="fx" aria-hidden="true"></canvas>
+<div id="border" aria-hidden="true"></div>
+<div id="caption" hidden></div>
+<div id="goal" hidden>
+  <div class="goal-head"><span id="goal-title"></span><span id="goal-num"></span></div>
+  <div class="goal-track"><div id="goal-fill"></div></div>
+</div>
+<div id="top" hidden>
+  <div id="top-title"></div>
+  <ol id="top-rows"></ol>
+</div>
+<div id="qr" hidden>
+  <div id="qr-title"></div>
+  <div id="qr-code"></div>
+  <div id="qr-line"></div>
+</div>
+<div id="media"></div>
+<div id="alerts"></div>
+<div id="chat" hidden></div>
+<script type="module" src="/overlay/overlay.js"></script>
+</body>
+</html>

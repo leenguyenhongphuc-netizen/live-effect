@@ -1,0 +1,11 @@
+{
+  "name": "Live Effect",
+  "short_name": "Live Effect",
+  "description": "Bảng nút bấm hiệu ứng livestream",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#17161a",
+  "theme_color": "#17161a",
+  "icons": [{ "src": "/remote/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
+}

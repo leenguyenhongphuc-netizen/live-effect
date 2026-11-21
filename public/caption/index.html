@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Effect — Phụ đề dịch</title>
+<link rel="stylesheet" href="/caption/caption.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Phụ đề dịch</h1>
+    <p>Bạn nói, trang này nghe, dịch và đưa phụ đề lên live. Giữ tab này mở trong suốt buổi live.</p>
+  </header>
+
+  <section class="card">
+    <div class="grid">
+      <label class="field"><span>Bạn nói tiếng</span><select id="source"></select></label>
+      <fieldset class="field"><legend>Dịch sang (tối đa 2)</legend><div id="targets" class="checks"></div></fieldset>
+    </div>
+    <button type="button" id="toggle" class="btn primary">Bắt đầu nghe</button>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="card">
+    <h2>Đang lên sóng</h2>
+    <div id="live" class="live" aria-live="off"><p class="muted">Chưa có câu nào.</p></div>
+  </section>
+
+  <section class="card" id="chatcard" hidden>
+    <h2>Bình luận vừa dịch</h2>
+    <div id="chatlog" class="chatlog"></div>
+  </section>
+
+  <section class="card">
+    <h2>Gõ thử</h2>
+    <p class="muted">Không cần micro: gõ một câu để xem phụ đề hiện trên live thế nào.</p>
+    <form id="manual" class="row">
+      <input id="text" class="input" type="text" autocomplete="off" aria-label="Câu thử" placeholder="Chào mọi người, cảm ơn đã ghé xem">
+      <button type="submit" class="btn">Gửi lên live</button>
+    </form>
+  </section>
+</main>
+<script type="module" src="/caption/caption.js"></script>
+</body>
+</html>

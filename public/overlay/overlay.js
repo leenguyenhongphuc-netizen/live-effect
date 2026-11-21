@@ -1,0 +1,374 @@
+import { Fx } from '/overlay/fx.js';
+import { playSound, stopSounds } from '/overlay/sound.js';
+import { keyedCanvas } from '/overlay/key.js';
+import { Reactive } from '/overlay/react.js';
+import { JarView } from '/overlay/jar.js';
+import { Extras } from '/overlay/extras.js';
+import { GameView } from '/overlay/game.js';
+import { Scenery, Bgm } from '/overlay/bgm.js';
+import { Zones } from '/overlay/zones.js';
+import { Atmos } from '/overlay/atmos.js';
+
+// Tham số trên link:
+//   ?preview=1            khung xem thử trong bảng điều khiển (tắt tiếng)
+//   ?layers=fx,alerts...  chỉ hiện một số lớp, dùng khi muốn tách thành nhiều nguồn trong OBS
+const params = new URLSearchParams(location.search);
+const preview = params.get('preview') === '1';
+const layers = new Set((params.get('layers') || 'scenery,bgm,game,extras,jar,caption,fx,alerts,media,chat,goal,top,qr').split(','));
+const has = (name) => layers.has(name);
+
+const $ = (id) => document.getElementById(id);
+const fx = new Fx($('fx'));
+const react = new Reactive($('react'));
+const jar = new JarView($('jar'));
+const extras = new Extras(document.body);
+const game = new GameView(document.body);
+const scenery = new Scenery(document.body);
+const bgm = new Bgm(document.body, preview);
+const zones = new Zones(document.body);
+const atmos = new Atmos(document.body);
+let stageCam = 1;
+const showAudio = new Audio();
+showAudio.addEventListener('ended', () => { bgm.duck(false); if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'showEnded' })); });
+const els = { alerts: $('alerts'), media: $('media'), chat: $('chat'), goal: $('goal'), border: $('border'), top: $('top'), qr: $('qr') };
+const nf = new Intl.NumberFormat('vi-VN');
+const httpUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : '');
+
+let widgets = {
+  alerts: { enabled: true, position: 'top' },
+  chat: { enabled: false, position: 'bottom-left', max: 6 },
+  goal: { enabled: false, position: 'top' },
+  top: { enabled: false, position: 'top-left', max: 3, title: '' },
+  qr: { enabled: false, position: 'bottom-right', title: '', svg: '', bank: '', holder: '' },
+};
+
+// --- Thông báo: hiện lần lượt từng cái -------------------------------------
+const alertQueue = [];
+let alertBusy = false;
+
+function nextAlert() {
+  if (alertBusy || !alertQueue.length) return;
+  alertBusy = true;
+  const item = alertQueue.shift();
+  const node = document.createElement('div');
+  node.className = 'alert';
+  const avatar = httpUrl(item.avatar);
+  if (avatar) {
+    const im = document.createElement('img');
+    im.alt = '';
+    im.referrerPolicy = 'no-referrer';
+    im.src = avatar;
+    im.onerror = () => { im.remove(); node.classList.add('no-avatar'); };
+    node.append(im);
+  } else {
+    node.classList.add('no-avatar');
+  }
+  const span = document.createElement('span');
+  span.textContent = item.text;
+  node.append(span);
+  els.alerts.replaceChildren(node);
+  // Hàng chờ dài thì rút ngắn thời gian hiện để không bị dồn.
+  const seconds = alertQueue.length > 3 ? Math.min(item.duration, 2.2) : item.duration;
+  setTimeout(() => {
+    node.classList.add('out');
+    setTimeout(() => {
+      node.remove();
+      alertBusy = false;
+      nextAlert();
+    }, 260);
+  }, seconds * 1000);
+}
+
+function pushAlert(text, avatar, duration) {
+  if (!has('alerts') || !widgets.alerts.enabled || !text) return;
+  if (alertQueue.length >= 25) alertQueue.shift();
+  alertQueue.push({ text, avatar, duration: Math.min(Math.max(duration, 2), 8) });
+  nextAlert();
+}
+
+// --- Hình / video bật lên -------------------------------------------------
+const mediaQueue = [];
+let mediaBusy = false;
+let currentMediaFinish = null;
+
+function nextMedia() {
+  if (mediaBusy || !mediaQueue.length) return;
+  mediaBusy = true;
+  const { name, duration, fit, key, id } = mediaQueue.shift();
+  const src = `/media/${encodeURIComponent(name)}`;
+  const isVideo = /\.(webm|mp4)$/i.test(name);
+  const source = document.createElement(isVideo ? 'video' : 'img');
+  // Video cần xoá nền thì vẽ qua canvas; phần tử video gốc chỉ để giải mã và phát tiếng.
+  const keyed = isVideo && key !== 'none' ? keyedCanvas(source, key) : null;
+  const node = keyed || source;
+  node.className = ['center', 'top', 'bottom'].includes(fit) ? fit : 'cover';
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    report(id);
+    node.classList.add('out');
+    setTimeout(() => {
+      keyed?.stop();
+      if (isVideo) { source.pause(); source.removeAttribute('src'); source.load(); }
+      node.remove();
+      mediaBusy = false;
+      if (!mediaQueue.length) bgm.duck(false);
+      nextMedia();
+    }, 240);
+  };
+  currentMediaFinish = finish;
+  source.onerror = finish;
+  if (isVideo) {
+    source.playsInline = true;
+    source.muted = preview;
+    source.onended = finish;
+    setTimeout(finish, 120000); // chặn video quá dài chiếm màn hình: tối đa 2 phút
+  } else {
+    source.alt = '';
+    setTimeout(finish, duration * 1000);
+  }
+  if (isVideo) bgm.duck(true);
+  source.src = src;
+  els.media.replaceChildren(node);
+  if (isVideo) source.play().catch(() => { source.muted = true; source.play().catch(finish); });
+}
+
+// Báo cho ứng dụng biết một món trong hàng đợi đã phát xong, để món kế tiếp được lên sóng.
+let socket = null;
+function report(id) {
+  if (id && socket?.readyState === 1) socket.send(JSON.stringify({ type: 'done', id }));
+}
+
+function pushMedia(name, duration, fit, key, id) {
+  if (!has('media') || !name) return;
+  if (mediaQueue.length >= 10) { report(id); return; }
+  mediaQueue.push({ name, duration, fit, key: key || 'none', id });
+  nextMedia();
+}
+
+// --- Viền sáng -------------------------------------------------------------
+let borderTimer = null;
+function flashBorder(duration) {
+  els.border.classList.add('on');
+  clearTimeout(borderTimer);
+  borderTimer = setTimeout(() => els.border.classList.remove('on'), duration * 1000);
+}
+
+// --- Khung bình luận và thanh mục tiêu ------------------------------------
+function addChat({ user, text }) {
+  if (!has('chat') || !widgets.chat.enabled || !text) return;
+  const row = document.createElement('div');
+  row.className = 'msg';
+  const b = document.createElement('b');
+  b.textContent = user || 'Khán giả';
+  row.append(b, document.createTextNode(String(text).slice(0, 200)));
+  els.chat.append(row);
+  while (els.chat.children.length > widgets.chat.max) els.chat.firstElementChild.remove();
+}
+
+function setGoal({ value = 0, target = 1, title = '' }) {
+  $('goal-title').textContent = title;
+  $('goal-num').textContent = `${nf.format(value)} / ${nf.format(target)}`;
+  $('goal-fill').style.width = `${Math.min(100, (value / target) * 100)}%`;
+  els.goal.classList.toggle('done', value >= target);
+}
+
+// --- Bảng top tặng quà ------------------------------------------------------
+function setTop(rows) {
+  const list = rows.map((r, i) => {
+    const li = document.createElement('li');
+    const rank = document.createElement('span');
+    rank.className = 'rank';
+    rank.textContent = String(i + 1);
+    li.append(rank);
+    const avatar = httpUrl(r.avatar);
+    if (avatar) {
+      const im = document.createElement('img');
+      im.alt = '';
+      im.referrerPolicy = 'no-referrer';
+      im.src = avatar;
+      im.onerror = () => im.remove();
+      li.append(im);
+    }
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = r.name || 'Ẩn danh';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = nf.format(r.coins || 0);
+    li.append(who, num);
+    return li;
+  });
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Chưa có ai, bạn mở màn nhé!';
+    list.push(li);
+  }
+  $('top-rows').replaceChildren(...list);
+}
+
+function applyWidgets(next) {
+  widgets = { ...widgets, ...next };
+  els.top.dataset.pos = widgets.top.position;
+  els.top.hidden = !(has('top') && widgets.top.enabled);
+  $('top-title').textContent = widgets.top.title;
+  els.qr.dataset.pos = widgets.qr.position;
+  els.qr.hidden = !(has('qr') && widgets.qr.enabled && widgets.qr.svg);
+  $('qr-title').textContent = widgets.qr.title;
+  // Mã QR là SVG do chính ứng dụng tạo từ số tài khoản; không có nội dung từ người xem.
+  if ($('qr-code').dataset.svg !== widgets.qr.svg) {
+    $('qr-code').innerHTML = widgets.qr.svg || '';
+    $('qr-code').dataset.svg = widgets.qr.svg || '';
+  }
+  $('qr-line').textContent = [widgets.qr.holder, widgets.qr.bank].filter(Boolean).join('\n');
+  els.alerts.dataset.pos = widgets.alerts.position;
+  els.chat.dataset.pos = widgets.chat.position;
+  els.chat.hidden = !(has('chat') && widgets.chat.enabled);
+  els.goal.dataset.pos = widgets.goal.position;
+  els.goal.hidden = !(has('goal') && widgets.goal.enabled);
+  while (els.chat.children.length > widgets.chat.max) els.chat.firstElementChild.remove();
+}
+
+// --- Phụ đề dịch ------------------------------------------------------------
+let captionCfg = { enabled: false, showOriginal: true, position: 'bottom', size: 2 };
+let captionTimer = null;
+const captionEl = $('caption');
+
+function applyCaptions(cfg) {
+  if (!cfg) return;
+  captionCfg = cfg;
+  captionEl.dataset.pos = cfg.position;
+  captionEl.dataset.size = cfg.size;
+  if (!cfg.enabled) captionEl.hidden = true;
+}
+
+function showCaption({ text, lines = [], final }) {
+  if (!has('caption') || !captionCfg.enabled || !text) return;
+  // Câu đang nói dở chưa có bản dịch: giữ bản dịch của câu trước cho khỏi nhấp nháy.
+  if (!final && captionEl.querySelector('.tr') && !lines.length) {
+    const src = captionEl.querySelector('.src');
+    if (src) src.textContent = text;
+  } else {
+    const rows = lines.map((l) => { const p = document.createElement('p'); p.className = 'tr'; p.textContent = l.text; return p; });
+    if (captionCfg.showOriginal || !rows.length) {
+      const p = document.createElement('p');
+      p.className = rows.length ? 'src' : 'tr';
+      p.textContent = text;
+      rows.push(p);
+    }
+    captionEl.replaceChildren(...rows);
+  }
+  captionEl.hidden = false;
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => { captionEl.hidden = true; }, 7000);
+}
+
+function clearAll() {
+  zones.clear();
+  fx.clear();
+  alertQueue.length = 0;
+  mediaQueue.length = 0;
+  currentMediaFinish?.();
+  els.alerts.replaceChildren();
+  alertBusy = false;
+  mediaBusy = false;
+  els.border.classList.remove('on');
+  stopSounds();
+}
+
+function onMessage(msg) {
+  switch (msg.type) {
+    case 'fx':
+      if (has('fx')) {
+        if (msg.effect === 'border') flashBorder(msg.duration);
+        else if (msg.effect && msg.effect !== 'none') {
+          fx.play(msg.effect, { intensity: msg.intensity, duration: msg.duration, image: httpUrl(msg.image) });
+        }
+        playSound(msg.sound, preview);
+      }
+      if (msg.zone && msg.zoneMedia && has('media')) zones.play(msg.zone, msg.zoneMedia, msg.mediaKey, msg.zoneLoop);
+      pushAlert(msg.alert, msg.avatar, msg.duration);
+      pushMedia(msg.media, msg.duration, msg.mediaFit, msg.mediaKey, msg.id);
+      break;
+    case 'widgets':
+      applyWidgets(msg.widgets);
+      if (has('fx')) react.setConfig(msg.music);
+      applyCaptions(msg.captions);
+      if (has('jar')) jar.setConfig(msg.jar);
+      if (has('extras')) extras.setConfig(msg.extras);
+      if (has('game')) game.setConfig(msg.game);
+      if (has('scenery')) scenery.setConfig(msg.scenery);
+      zones.setConfig(msg.zones);
+      if (has('extras')) extras.setAuctionPos(msg.auction?.position);
+      if (has('bgm')) bgm.setConfig(msg.bgm);
+      break;
+    case 'audio': if (has('fx')) react.onAudio(msg); break;
+    case 'caption': showCaption(msg); break;
+    case 'game':
+      // Vừa có người mở trúng bẫy: thêm tiếng nổ và viền đỏ cho rõ khoảnh khắc.
+      if (has('game') && game.setState(msg) && has('fx')) { playSound('boom', preview); flashBorder(1.6); }
+      break;
+    case 'bgm': if (has('bgm')) bgm.cmd(msg); break;
+    case 'auction': if (has('extras')) extras.onAuction(msg); break;
+    case 'stage':
+      // Đổi góc máy: khói tối lướt qua, vùng ánh xạ dời theo.
+      if (msg.cam !== stageCam) { stageCam = msg.cam; atmos.wipe(); }
+      zones.setCam(msg.cam);
+      break;
+    case 'mood':
+      atmos.setMood(msg);
+      // Cao trào thì lớp theo nhạc (tàn lửa, sét) dày hơn.
+      react.boost = msg.active && msg.level === 'peak' ? 1.8 : msg.active && msg.level === 'calm' ? 0.5 : 1;
+      break;
+    case 'zonepreview': zones.preview(msg.cam); break;
+    case 'show':
+      zones.clear();
+      // Nhạc của bài diễn: phát từ đầu khi bắt đầu, dừng hẳn khi kết thúc. Nhạc nền nhường chỗ.
+      showAudio.pause();
+      if (msg.cmd === 'start' && msg.track && !preview) {
+        bgm.duck(true);
+        showAudio.src = `/media/${encodeURIComponent(msg.track)}`;
+        showAudio.play().catch(() => {});
+      } else bgm.duck(false);
+      break;
+    case 'queueboard': extras.onQueue(msg); break;
+    case 'timer': extras.onTimer(msg); break;
+    case 'toplikes': extras.onLikes(msg); break;
+    case 'bestgift': extras.onBest(msg); break;
+    case 'jar': if (has('jar')) jar.setState(msg); break;
+    case 'jardrop': if (has('jar')) jar.drop(msg); break;
+    case 'jarburst':
+      if (!has('jar')) break;
+      jar.burst(msg);
+      // Hũ đầy: tự ăn mừng bằng pháo giấy và kèn, không cần tạo kịch bản.
+      if (has('fx')) { fx.play('confetti', { intensity: 3, duration: 4 }); playSound('fanfare', preview); }
+      break;
+    case 'chat': addChat(msg); break;
+    case 'goal': setGoal(msg); break;
+    case 'top': setTop(Array.isArray(msg.rows) ? msg.rows : []); break;
+    case 'clear': clearAll(); break;
+    default: break;
+  }
+}
+
+// --- Kết nối tới ứng dụng, tự nối lại khi ứng dụng khởi động lại ---------
+let retry = 500;
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws?role=overlay${preview ? '&preview=1' : ''}`);
+  socket = ws;
+  ws.onopen = () => { retry = 500; };
+  ws.onmessage = (e) => {
+    try { onMessage(JSON.parse(e.data)); } catch { /* bỏ qua tin hỏng */ }
+  };
+  ws.onclose = () => {
+    setTimeout(connect, retry);
+    retry = Math.min(retry * 2, 5000);
+  };
+}
+applyWidgets(widgets);
+connect();
+
+// Cho phép kiểm thử tự động đọc trạng thái.
+window.__overlay = { atmos, zones, fx, react, jar, extras, game, scenery, bgm, onMessage };
