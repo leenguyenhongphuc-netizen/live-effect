@@ -1,0 +1,1 @@
+{ "name": "Live Effect Sân khấu", "short_name": "Live Effect", "display": "fullscreen", "orientation": "portrait", "background_color": "#000000", "theme_color": "#000000", "start_url": "./", "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }

@@ -9,6 +9,8 @@
     "test": "node --test test/*.test.js",
     "audit": "node scripts/audit.js",
     "demo": "node scripts/demo-video.js",
+    "build:mobile": "node scripts/build-mobile.js",
+    "test:mobile": "node scripts/test-mobile.js",
     "dist": "electron-builder --win --x64"
   },
   "repository": {
@@ -28,6 +30,7 @@
     "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0"
   },
